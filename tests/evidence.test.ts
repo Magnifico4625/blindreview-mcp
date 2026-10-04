@@ -305,3 +305,17 @@ describe("pilot fixes", () => {
     expect(meter.callsWithoutCost).toBe(0);
   });
 });
+
+describe("ledger across processes", () => {
+  it("spent reflects entries appended by another writer", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "ledger2-"));
+    const f = path.join(dir, "spend.jsonl");
+    const a = new SpendLedger(f);
+    const b = new SpendLedger(f);
+    await a.add({ ts: "t", label: "a", model: "m", mode: "evidence_gate", case_id: "c", run: 1, cost_usd: 0.1, source: "reported" });
+    await b.add({ ts: "t", label: "b", model: "m", mode: "evidence_gate", case_id: "c", run: 1, cost_usd: 0.2, source: "reported" });
+    expect(a.spent).toBeCloseTo(0.3);
+    expect(b.spent).toBeCloseTo(0.3);
+    await rm(dir, { recursive: true, force: true });
+  });
+});

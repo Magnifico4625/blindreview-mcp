@@ -1,4 +1,5 @@
-import { appendFile, mkdir, readFile } from "node:fs/promises";
+import { readFileSync } from "node:fs";
+import { appendFile, mkdir } from "node:fs/promises";
 import path from "node:path";
 import type { Usage } from "../../src/schemas/review.js";
 
@@ -73,30 +74,37 @@ export interface LedgerEntry {
   source: "reported" | "estimated";
 }
 
-/** Append-only spend ledger shared by all v0.4.0 runs (cumulative budget across invocations). */
+/**
+ * Append-only spend ledger shared by all v0.4.0 runs (cumulative budget across invocations).
+ * `spent` re-reads the file every time, so several runner processes writing to the same ledger
+ * all see the combined spend (the file is tiny).
+ */
 export class SpendLedger {
-  private total = 0;
-  private loaded = false;
   constructor(readonly file: string) {}
 
-  async load(): Promise<number> {
-    const text = await readFile(this.file, "utf8").catch(() => "");
-    this.total = text
+  private read(): number {
+    let text = "";
+    try {
+      text = readFileSync(this.file, "utf8");
+    } catch {
+      return 0;
+    }
+    return text
       .split("\n")
       .filter(Boolean)
       .reduce((s, l) => s + (JSON.parse(l) as LedgerEntry).cost_usd, 0);
-    this.loaded = true;
-    return this.total;
+  }
+
+  async load(): Promise<number> {
+    return this.read();
   }
 
   get spent(): number {
-    if (!this.loaded) throw new Error("ledger not loaded");
-    return this.total;
+    return this.read();
   }
 
   async add(e: LedgerEntry): Promise<void> {
     await mkdir(path.dirname(this.file), { recursive: true });
     await appendFile(this.file, `${JSON.stringify(e)}\n`, "utf8");
-    this.total += e.cost_usd;
   }
 }
