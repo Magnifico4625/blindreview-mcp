@@ -142,6 +142,19 @@ describe("runner", () => {
     expect(m).toMatchObject({ expected: 2, successful: 1, failed: 1, failure_reasons: { PROVIDER_HTTP_ERROR: 1 }, retried_runs: 1 });
   });
 
+  it("checkpoints every record and resumes without re-running finished ones", async () => {
+    const { cases } = await loadCases(casesDir);
+    const subset = cases.slice(0, 3);
+    const saved: RunRecord[] = [];
+    const full = await runBenchmark(subset, testConfig, { label: "t", runs: 2, caseSetHash: "x", provider: answer(), onRecord: (r) => void saved.push(r) });
+    expect(saved).toHaveLength(full.records.length);
+    const provider = answer();
+    const resumed = await runBenchmark(subset, testConfig, { label: "t", runs: 2, caseSetHash: "x", provider, resumeRecords: saved.slice(0, 10) });
+    expect(resumed.records).toHaveLength(full.records.length);
+    const calls = (m: string) => ({ proposal_first: 1, decision_judge: 1 })[m] ?? 2;
+    expect(provider.requests).toHaveLength(full.records.slice(0).reduce((n, r) => n + calls(r.mode), 0) - saved.slice(0, 10).reduce((n, r) => n + calls(r.mode), 0));
+  });
+
   it("mode order is shuffled reproducibly", async () => {
     const { cases } = await loadCases(casesDir);
     const orders = async () => {

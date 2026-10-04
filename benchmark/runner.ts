@@ -25,6 +25,10 @@ export interface BenchmarkOptions {
   caseSetHash: string;
   provider: ReviewerProvider;
   log?: (msg: string) => void;
+  /** Called after every finished (case, run, mode) record, e.g. to append it to a checkpoint file. */
+  onRecord?: (record: RunRecord) => void | Promise<void>;
+  /** Records from an interrupted run (same config); their (case, run, mode) keys are not re-run. */
+  resumeRecords?: RunRecord[];
 }
 
 export interface BenchmarkReport {
@@ -142,14 +146,27 @@ export async function runBenchmark(cases: BenchmarkCase[], config: Config, optio
     return record;
   };
 
+  const key = (caseId: string, run: number, mode: string) => `${caseId}\u0000${run}\u0000${mode}`;
   const records: RunRecord[] = [];
+  const done = new Set<string>();
+  const known = new Set(units.flatMap((u) => modes.map((m) => key(u.c.id, u.run, m))));
+  for (const r of options.resumeRecords ?? []) {
+    const k = key(r.case_id, r.run, r.mode);
+    if (known.has(k) && !done.has(k)) {
+      done.add(k);
+      records.push(r);
+    }
+  }
+  if (done.size) log(`resuming: ${done.size} records reused from checkpoint`);
   let next = 0;
   const worker = async () => {
     while (next < units.length) {
       const unit = units[next++] as (typeof units)[number];
       for (const mode of unit.order) {
+        if (done.has(key(unit.c.id, unit.run, mode))) continue;
         const r = await reviewWithRetries(unit.c, unit.run, mode);
         records.push(r);
+        await options.onRecord?.(r);
         log(
           `${unit.c.id} run${unit.run} [${mode}] ${r.ok ? `${r.result?.verdict} tokens=${r.result?.meta.usage.total_tokens} ${r.latency_ms}ms` : `FAILED ${r.error?.code}`}${r.retries.length ? ` (retries: ${r.retries.length})` : ""}`,
         );

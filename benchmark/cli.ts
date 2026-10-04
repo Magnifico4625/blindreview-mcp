@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { loadConfig, loadDotEnv } from "../src/config.js";
@@ -7,6 +7,7 @@ import { ALL_MODES, type AnyMode } from "../src/schemas/review.js";
 import { DEFAULT_CASES_DIR, loadCases } from "./cases.js";
 import { exportSheet } from "./human-review.js";
 import { toExperimentMarkdown, toMarkdown } from "./report.js";
+import type { RunRecord } from "./metrics.js";
 import { DEFAULT_MODES, fileTimestamp, runBenchmark } from "./runner.js";
 
 const USAGE = `Usage: npm run benchmark -- [casesDir] [options]   (default casesDir: ${DEFAULT_CASES_DIR})
@@ -18,6 +19,8 @@ const USAGE = `Usage: npm run benchmark -- [casesDir] [options]   (default cases
   --concurrency N           parallel (case, run) units (default: BENCHMARK_CONCURRENCY or 2)
   --retries N               retries per review on transient errors (default 2)
   --out DIR                 default benchmark-results
+  --resume                  reuse finished records from <out>/<label>/checkpoint.jsonl (same model/config/cases)
+                            (every finished record is always appended to that checkpoint file)
   Provider config (override env): --base-url --model --reasoning-effort --reasoning-param
   --temperature --max-tokens --max-review-tokens --timeout`;
 
@@ -44,7 +47,10 @@ async function main(): Promise<void> {
   const options = Object.fromEntries(
     ["label", "runs", "modes", "only", "seed", "concurrency", "retries", "out", ...Object.keys(FLAG_ENV)].map((k) => [k, { type: "string" as const }]),
   );
-  const { values, positionals } = parseArgs({ allowPositionals: true, options: { ...options, help: { type: "boolean", short: "h" } } });
+  const { values, positionals } = parseArgs({
+    allowPositionals: true,
+    options: { ...options, help: { type: "boolean", short: "h" }, resume: { type: "boolean" } },
+  });
   const v = values as Record<string, string | boolean | undefined>;
   if (v.help) {
     console.log(USAGE);
@@ -69,6 +75,32 @@ async function main(): Promise<void> {
   const label = String(v.label ?? config.model.replace(/[^A-Za-z0-9._-]+/g, "_"));
   if (!/^[A-Za-z0-9._-]+$/.test(label)) throw new Error("--label may only contain letters, digits, '.', '_' and '-'");
 
+  const outDir = path.join(path.resolve(String(v.out ?? "benchmark-results")), label);
+  await mkdir(outDir, { recursive: true });
+  const checkpoint = path.join(outDir, "checkpoint.jsonl");
+  const caseSetHash = loaded.hash + (cases.length !== loaded.cases.length ? `-subset${cases.length}` : "");
+  const header = {
+    type: "header",
+    model: config.model,
+    base_url: config.baseUrl,
+    reasoning_effort: config.reasoningEffort ?? null,
+    temperature: config.temperature ?? null,
+    max_tokens_per_call: config.maxTokensPerCall,
+    max_review_tokens: config.maxReviewTokens,
+    case_set_hash: caseSetHash,
+  };
+  let resumeRecords: RunRecord[] = [];
+  if (v.resume) {
+    const lines = (await readFile(checkpoint, "utf8").catch(() => "")).split("\n").filter(Boolean).map((l) => JSON.parse(l) as Record<string, unknown>);
+    if (lines.length) {
+      if (JSON.stringify(lines[0]) !== JSON.stringify(header)) throw new Error(`--resume: ${checkpoint} was written with a different model/config/case set`);
+      resumeRecords = lines.slice(1) as unknown as RunRecord[];
+    }
+  } else {
+    await writeFile(checkpoint, `${JSON.stringify(header)}\n`, "utf8");
+  }
+  if (v.resume && !resumeRecords.length) await writeFile(checkpoint, `${JSON.stringify(header)}\n`, "utf8");
+
   console.log(`[${label}] ${cases.length} cases x ${modes.join(", ")} x ${runs} runs, model ${config.model}, concurrency ${concurrency}`);
   const report = await runBenchmark(cases, config, {
     label,
@@ -77,13 +109,12 @@ async function main(): Promise<void> {
     seed: int("--seed", v.seed as string | undefined, 42),
     concurrency,
     retries: int("--retries", v.retries as string | undefined, 2),
-    caseSetHash: loaded.hash + (cases.length !== loaded.cases.length ? `-subset${cases.length}` : ""),
+    caseSetHash,
     provider: buildProvider(config),
     log: (m) => console.log(m),
+    resumeRecords,
+    onRecord: (r) => appendFile(checkpoint, `${JSON.stringify(r)}\n`, "utf8"),
   });
-
-  const outDir = path.join(path.resolve(String(v.out ?? "benchmark-results")), label);
-  await mkdir(outDir, { recursive: true });
   const base = path.join(outDir, fileTimestamp(new Date(report.created_at)));
   await writeFile(`${base}.json`, `${JSON.stringify(report, null, 2)}\n`, "utf8");
   await writeFile(`${base}.md`, toMarkdown(report), "utf8");
