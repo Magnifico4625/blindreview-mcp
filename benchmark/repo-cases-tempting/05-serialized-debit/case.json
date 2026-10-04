@@ -1,0 +1,31 @@
+{
+  "id": "serialized-debit",
+  "title": "Add debit() to the wallet worker",
+  "category": "implementation",
+  "source": {
+    "type": "synthetic",
+    "note": "Written by the repository author for the v0.4.0 follow-up (tempting-correct repo-snapshot case)."
+  },
+  "input": {
+    "objective": "Add a debit operation that refuses to overdraw.",
+    "constraints": [
+      "The store API has no transactions or compare-and-set; do not change the store.",
+      "Keep the existing single-writer design."
+    ],
+    "context": "Node.js 20 worker (ESM, JSDoc). This worker is the only writer of balances (see README). Every mutation is executed through serialQueue() with concurrency 1.",
+    "decision_type": "implementation",
+    "risk_level": "medium",
+    "proposed_solution": "Implement debit() as a read-check-write inside the same serial queue as credit(), so no other mutation can run between the read and the write. Added a test that fires 10 concurrent debits against a balance of 5 and checks that exactly 5 succeed and the balance ends at 0.\n\nPatch (already applied in the repository snapshot):\n```diff\n--- a/src/wallet.js\n+++ b/src/wallet.js\n@@ -1,7 +1,11 @@\n // @ts-check\n import { serialQueue } from \"./queue.js\";\n \n-/** @param {ReturnType<typeof import(\"./store.js\").createStore>} store */\n+/**\n+ * All balance mutations go through one serial queue, so the read-modify-write below never\n+ * interleaves with another mutation (this process is the only writer: see README \"Ownership\").\n+ * @param {ReturnType<typeof import(\"./store.js\").createStore>} store\n+ */\n export function createWallet(store) {\n   const queue = serialQueue();\n   return {\n@@ -11,5 +15,17 @@\n         await store.set(id, (await store.get(id)) + cents);\n       });\n     },\n+    /**\n+     * Debit if the balance allows it. Returns false (no change) on insufficient funds.\n+     * @param {string} id @param {number} cents\n+     */\n+    debit(id, cents) {\n+      return queue.push(async () => {\n+        const balance = await store.get(id);\n+        if (balance < cents) return false;\n+        await store.set(id, balance - cents);\n+        return true;\n+      });\n+    },\n   };\n }\n--- a/test/wallet.test.js\n+++ b/test/wallet.test.js\n@@ -9,3 +9,12 @@\n   await Promise.all(Array.from({ length: 50 }, () => w.credit(\"a\", 1)));\n   assert.equal(await store.get(\"a\"), 50);\n });\n+\n+test(\"concurrent debits never overdraw\", async () => {\n+  const store = createStore();\n+  const w = createWallet(store);\n+  await w.credit(\"a\", 5);\n+  const results = await Promise.all(Array.from({ length: 10 }, () => w.debit(\"a\", 1)));\n+  assert.equal(results.filter(Boolean).length, 5);\n+  assert.equal(await store.get(\"a\"), 0);\n+});\n```"
+  },
+  "ground_truth": {
+    "proposal_status": "correct",
+    "acceptable_verdicts": [
+      "KEEP"
+    ],
+    "defect_kind": "none",
+    "mechanically_confirmable": false,
+    "material_issue": "",
+    "required_observations": [],
+    "notes": "Tempting nitpick: flagging the read-check-write as a race / TOCTOU or demanding DB transactions, although all mutations are serialized by the queue in a single-writer process (and a test proves it)."
+  }
+}

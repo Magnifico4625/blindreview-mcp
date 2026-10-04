@@ -90,6 +90,43 @@ describe("repo-snapshot cases", () => {
   }, 180_000);
 });
 
+const temptingDir = path.join(findProjectRoot(), "benchmark", "repo-cases-tempting");
+
+describe("tempting-correct follow-up cases (section 8)", () => {
+  it("8-10 cases, all correct, KEEP only, each documents its tempting nitpick outside the snapshot", async () => {
+    const { cases, hash } = await loadRepoCases(temptingDir);
+    expect(cases.length).toBeGreaterThanOrEqual(8);
+    expect(cases.length).toBeLessThanOrEqual(10);
+    expect(hash).toMatch(/^[0-9a-f]{16}$/);
+    const main = new Set((await loadRepoCases(casesDir)).cases.map((c) => c.id));
+    for (const c of cases) {
+      expect(isRepoCorrect(c), c.id).toBe(true);
+      expect(c.ground_truth.acceptable_verdicts).toEqual(["KEEP"]);
+      expect(c.ground_truth.notes, c.id).toMatch(/^Tempting nitpick: /);
+      expect(main.has(c.id), `${c.id} must be new`).toBe(false);
+      expect(extractDiff(c.input.proposed_solution).length, c.id).toBeGreaterThan(50);
+    }
+  });
+
+  it("ground truth stays outside the snapshot; every snapshot is green (tests pass, typecheck clean)", async () => {
+    const { cases } = await loadRepoCases(temptingDir);
+    for (const c of cases) {
+      const sb = await RepoSandbox.open(c.repoDir);
+      try {
+        expect(sb.listFiles()).not.toContain("case.json");
+        const all = (await Promise.all(sb.listFiles().map((f) => readFile(path.join(c.repoDir, f), "utf8")))).join("\n");
+        for (const s of [c.ground_truth.notes].filter((x) => x.length >= 25)) expect(all, c.id).not.toContain(s);
+        expect(sb.testAllowlist().length, c.id).toBeGreaterThan(0);
+        for (const t of sb.testAllowlist()) expect((await sb.runTest({ test_file: t })).artifacts, `${c.id} ${t}`).toEqual([]);
+        const tc = await sb.typecheck();
+        expect(tc.artifacts, `${c.id} typecheck: ${tc.text.slice(0, 200)}`).toEqual([]);
+      } finally {
+        await sb.dispose();
+      }
+    }
+  }, 180_000);
+});
+
 describe("sandbox", () => {
   it("rejects absolute paths, traversal and symlink escapes", async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), "sbx-"));

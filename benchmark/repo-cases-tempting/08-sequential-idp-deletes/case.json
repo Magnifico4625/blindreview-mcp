@@ -1,0 +1,31 @@
+{
+  "id": "sequential-idp-deletes",
+  "title": "Delete users sequentially in the nightly purge",
+  "category": "api",
+  "source": {
+    "type": "synthetic",
+    "note": "Written by the repository author for the v0.4.0 follow-up (tempting-correct repo-snapshot case)."
+  },
+  "input": {
+    "objective": "The nightly user purge fails every night: the identity provider rejects parallel admin calls with 429 and locks the client out for 60 seconds.",
+    "constraints": [
+      "Provider rule (documented by the vendor): at most ONE in-flight admin request per client; a second concurrent request triggers a 60 s lockout.",
+      "The purge handles at most ~300 ids per night and has a 2-hour window."
+    ],
+    "context": "Node.js 20 batch job (ESM, JSDoc). Each delete takes ~150 ms, so 300 sequential deletes take under a minute.",
+    "decision_type": "api",
+    "risk_level": "low",
+    "proposed_solution": "Replace Promise.all with a plain sequential loop (with a lint suppression explaining why). Added a test asserting at most one request in flight.\n\nPatch (already applied in the repository snapshot):\n```diff\n--- a/src/purge.js\n+++ b/src/purge.js\n@@ -1,10 +1,16 @@\n // @ts-check\n \n /**\n+ * Deletes users one by one, on purpose. The identity provider's admin API allows exactly one\n+ * in-flight request per client and answers 429 + a 60 s lockout otherwise (see the task context).\n+ * The purge runs nightly on at most a few hundred ids, so throughput does not matter.\n  * @param {{ deleteUser: (id: string) => Promise<void> }} api\n  * @param {string[]} ids\n  */\n export async function purgeUsers(api, ids) {\n-  await Promise.all(ids.map((id) => api.deleteUser(id)));\n+  for (const id of ids) {\n+    // eslint-disable-next-line no-await-in-loop -- sequential by design (provider allows 1 in-flight request)\n+    await api.deleteUser(id);\n+  }\n   return ids.length;\n }\n--- a/test/purge.test.js\n+++ b/test/purge.test.js\n@@ -7,3 +7,10 @@\n   assert.equal(await purgeUsers({ deleteUser: async (id) => { deleted.push(id); } }, [\"a\", \"b\"]), 2);\n   assert.deepEqual(deleted.sort(), [\"a\", \"b\"]);\n });\n+\n+test(\"never more than one request in flight\", async () => {\n+  let inFlight = 0, max = 0;\n+  const api = { deleteUser: async () => { inFlight++; max = Math.max(max, inFlight); await new Promise((r) => setTimeout(r, 2)); inFlight--; } };\n+  await purgeUsers(api, [\"a\", \"b\", \"c\", \"d\"]);\n+  assert.equal(max, 1);\n+});\n```"
+  },
+  "ground_truth": {
+    "proposal_status": "correct",
+    "acceptable_verdicts": [
+      "KEEP"
+    ],
+    "defect_kind": "none",
+    "mechanically_confirmable": false,
+    "material_issue": "",
+    "required_observations": [],
+    "notes": "Tempting nitpick: 'await in a loop is slow, use Promise.all / p-limit / batching' advice, although the provider allows exactly one in-flight request and throughput is irrelevant."
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "id": "md5-cache-key",
+  "title": "Use MD5 cache keys to match the remote cache",
+  "category": "implementation",
+  "source": {
+    "type": "synthetic",
+    "note": "Written by the repository author for the v0.4.0 follow-up (tempting-correct repo-snapshot case)."
+  },
+  "input": {
+    "objective": "Local cache keys never match the remote artifact cache, so every CI job re-uploads artifacts. Make local keys match remote ones.",
+    "constraints": [
+      "Do not change how the remote cache is addressed (it is shared with other teams).",
+      "No new dependencies."
+    ],
+    "context": "Internal build tool. The remote cache addresses objects by S3 ETag, which for single-part uploads is the MD5 of the body. The cache only stores build outputs produced by our own CI; it is not a security or integrity boundary (artifacts are signed separately at release time).",
+    "decision_type": "implementation",
+    "risk_level": "low",
+    "proposed_solution": "Compute the local key with MD5 instead of SHA-256 so it equals the remote ETag. Added a test with a known MD5 value. Collision resistance is irrelevant here: keys are not attacker-controlled and the cache is not trusted for integrity.\n\nPatch (already applied in the repository snapshot):\n```diff\n--- a/src/key.js\n+++ b/src/key.js\n@@ -1,7 +1,13 @@\n // @ts-check\n import { createHash } from \"node:crypto\";\n \n-/** Content-addressed key for the build artifact cache. @param {string} content */\n+/**\n+ * Content-addressed key for the local build artifact cache.\n+ * MD5 is used on purpose: the key only has to match the remote cache, which stores\n+ * objects under their MD5 (the S3 ETag of a single-part upload). The cache is not a\n+ * security boundary: entries are produced by our own CI and keys are never trusted input.\n+ * @param {string} content\n+ */\n export function cacheKey(content) {\n-  return createHash(\"sha256\").update(content).digest(\"hex\");\n+  return createHash(\"md5\").update(content).digest(\"hex\");\n }\n--- a/test/key.test.js\n+++ b/test/key.test.js\n@@ -6,3 +6,9 @@\n   assert.equal(cacheKey(\"a\"), cacheKey(\"a\"));\n   assert.notEqual(cacheKey(\"a\"), cacheKey(\"b\"));\n });\n+\n+test(\"key matches the remote ETag (MD5 of the body)\", async () => {\n+  const { remoteHas } = await import(\"../src/remote.js\");\n+  const bucket = new Map([[\"0cc175b9c0f1b6a831c399e269772661\", \"a\"]]);\n+  assert.equal(remoteHas(bucket, cacheKey(\"a\")), true);\n+});\n```"
+  },
+  "ground_truth": {
+    "proposal_status": "correct",
+    "acceptable_verdicts": [
+      "KEEP"
+    ],
+    "defect_kind": "none",
+    "mechanically_confirmable": false,
+    "material_issue": "",
+    "required_observations": [],
+    "notes": "Tempting nitpick: 'MD5 is broken, use SHA-256' advice, although this is not a security use and MD5 is dictated by the remote ETag."
+  }
+}

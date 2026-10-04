@@ -1,0 +1,31 @@
+{
+  "id": "float-average-display",
+  "title": "Average order value tile",
+  "category": "implementation",
+  "source": {
+    "type": "synthetic",
+    "note": "Written by the repository author for the v0.4.0 follow-up (tempting-correct repo-snapshot case)."
+  },
+  "input": {
+    "objective": "Add an 'average order value' tile to the internal sales dashboard, shown with two decimals.",
+    "constraints": [
+      "Display only: the value is not stored, exported, or used for billing.",
+      "Amounts in the ledger stay integer cents."
+    ],
+    "context": "Internal dashboard (Node.js 20, ESM, JSDoc). Order totals are integer cents (at most a few million orders per period, far below 2^53). The tile shows a rounded number for humans.",
+    "decision_type": "implementation",
+    "risk_level": "low",
+    "proposed_solution": "Sum the integer cents exactly, divide by the order count and by 100 once, and format with toFixed(2). Added tests including the empty case.\n\nPatch (already applied in the repository snapshot):\n```diff\n--- a/src/report.js\n+++ b/src/report.js\n@@ -4,3 +4,14 @@\n export function revenueCents(orderTotalsCents) {\n   return orderTotalsCents.reduce((a, b) => a + b, 0);\n }\n+\n+/**\n+ * Average order value for the dashboard tile, as a display string (\"12.35\").\n+ * Display-only: nothing is stored or billed from this value; the ledger keeps integer cents.\n+ * Floating point is fine here because the result is rounded once for display.\n+ * @param {number[]} orderTotalsCents\n+ */\n+export function averageOrderValueLabel(orderTotalsCents) {\n+  if (orderTotalsCents.length === 0) return \"0.00\";\n+  return (revenueCents(orderTotalsCents) / orderTotalsCents.length / 100).toFixed(2);\n+}\n--- a/test/report.test.js\n+++ b/test/report.test.js\n@@ -1,7 +1,13 @@\n import { test } from \"node:test\";\n import assert from \"node:assert/strict\";\n-import { revenueCents } from \"../src/report.js\";\n+import { averageOrderValueLabel, revenueCents } from \"../src/report.js\";\n \n test(\"sums cents\", () => {\n   assert.equal(revenueCents([100, 250]), 350);\n });\n+\n+test(\"average order value label\", () => {\n+  assert.equal(averageOrderValueLabel([]), \"0.00\");\n+  assert.equal(averageOrderValueLabel([1000, 1470]), \"12.35\");\n+  assert.equal(averageOrderValueLabel([1, 1, 1]), \"0.01\");\n+});\n```"
+  },
+  "ground_truth": {
+    "proposal_status": "correct",
+    "acceptable_verdicts": [
+      "KEEP"
+    ],
+    "defect_kind": "none",
+    "mechanically_confirmable": false,
+    "material_issue": "",
+    "required_observations": [],
+    "notes": "Tempting nitpick: 'never use floating point for money / use a decimal library / banker's rounding' advice for a display-only, rounded-once average."
+  }
+}

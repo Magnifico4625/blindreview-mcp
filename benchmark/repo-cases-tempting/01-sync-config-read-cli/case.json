@@ -1,0 +1,31 @@
+{
+  "id": "sync-config-read-cli",
+  "title": "Read the CLI config synchronously at startup",
+  "category": "implementation",
+  "source": {
+    "type": "synthetic",
+    "note": "Written by the repository author for the v0.4.0 follow-up (tempting-correct repo-snapshot case)."
+  },
+  "input": {
+    "objective": "The option parser we are migrating to calls the `defaults` callback synchronously, so option defaults that come from build.config.json must be available synchronously.",
+    "constraints": [
+      "Keep the config format unchanged.",
+      "No new dependencies."
+    ],
+    "context": "build-cli is a one-shot command-line tool (Node.js 20, ESM, JSDoc types). It is not a server: it reads one small JSON config at startup, does its work, and exits. Nothing else runs concurrently in the process before the config is loaded.",
+    "decision_type": "implementation",
+    "risk_level": "low",
+    "proposed_solution": "Switch loadConfig to readFileSync and make main()/defaults() synchronous. Blocking the event loop is irrelevant in a one-shot CLI before any other work starts, and it is what the synchronous parser callback requires. Tests updated.\n\nPatch (already applied in the repository snapshot):\n```diff\n--- a/src/cli.js\n+++ b/src/cli.js\n@@ -1,8 +1,15 @@\n // @ts-check\n import { loadConfig } from \"./config.js\";\n \n+/** Option defaults must be computed synchronously (the option parser calls this callback synchronously). */\n+/** @param {string} file */\n+export function defaults(file) {\n+  const config = loadConfig(file);\n+  return { outDir: config.outDir, minify: config.minify };\n+}\n+\n /** @param {string[]} argv */\n-export async function main(argv) {\n-  const config = await loadConfig(argv[0] ?? \"build.config.json\");\n+export function main(argv) {\n+  const config = defaults(argv[0] ?? \"build.config.json\");\n   return `building into ${config.outDir}${config.minify ? \" (minified)\" : \"\"}`;\n }\n--- a/src/config.js\n+++ b/src/config.js\n@@ -1,12 +1,17 @@\n // @ts-check\n-import { readFile } from \"node:fs/promises\";\n+import { readFileSync } from \"node:fs\";\n \n /**\n  * @typedef {{ outDir: string, minify: boolean }} BuildConfig\n  */\n \n-/** @param {string} file @returns {Promise<BuildConfig>} */\n-export async function loadConfig(file) {\n-  const raw = JSON.parse(await readFile(file, \"utf8\"));\n+/**\n+ * Read the build config once, synchronously, at process start.\n+ * This is a one-shot CLI: nothing else runs before the config is known, so blocking the event loop\n+ * here costs nothing, and a sync API lets the yargs-style `defaults()` callback stay synchronous.\n+ * @param {string} file @returns {BuildConfig}\n+ */\n+export function loadConfig(file) {\n+  const raw = JSON.parse(readFileSync(file, \"utf8\"));\n   return { outDir: String(raw.outDir ?? \"dist\"), minify: Boolean(raw.minify) };\n }\n--- a/test/cli.test.js\n+++ b/test/cli.test.js\n@@ -3,11 +3,19 @@\n import { mkdtempSync, writeFileSync } from \"node:fs\";\n import { tmpdir } from \"node:os\";\n import path from \"node:path\";\n-import { main } from \"../src/cli.js\";\n+import { defaults, main } from \"../src/cli.js\";\n \n-test(\"reads the config\", async () => {\n+test(\"reads the config\", () => {\n   const dir = mkdtempSync(path.join(tmpdir(), \"cfg-\"));\n   const f = path.join(dir, \"c.json\");\n   writeFileSync(f, JSON.stringify({ outDir: \"out\", minify: true }));\n-  assert.equal(await main([f]), \"building into out (minified)\");\n+  assert.equal(main([f]), \"building into out (minified)\");\n });\n+\n+test(\"defaults() is synchronous\", () => {\n+  const dir = mkdtempSync(path.join(tmpdir(), \"cfg-\"));\n+  const f = path.join(dir, \"c.json\");\n+  writeFileSync(f, JSON.stringify({}));\n+  const d = defaults(f);\n+  assert.deepEqual(d, { outDir: \"dist\", minify: false });\n+});\n```"
+  },
+  "ground_truth": {
+    "proposal_status": "correct",
+    "acceptable_verdicts": [
+      "KEEP"
+    ],
+    "defect_kind": "none",
+    "mechanically_confirmable": false,
+    "material_issue": "",
+    "required_observations": [],
+    "notes": "Tempting nitpick: 'never use sync fs APIs / blocking the event loop' advice that does not apply to a one-shot CLI."
+  }
+}

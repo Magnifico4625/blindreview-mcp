@@ -1,0 +1,31 @@
+{
+  "id": "loose-email-check",
+  "title": "Loosen the signup email check",
+  "category": "implementation",
+  "source": {
+    "type": "synthetic",
+    "note": "Written by the repository author for the v0.4.0 follow-up (tempting-correct repo-snapshot case)."
+  },
+  "input": {
+    "objective": "Support tickets: customers with uppercase letters, internationalized domains, apostrophes or long TLDs cannot sign up because the email regex rejects them.",
+    "constraints": [
+      "Every signup is followed by a confirmation email; the account is unusable until the link is clicked.",
+      "Do not add a validation library."
+    ],
+    "context": "Node.js 20 signup service (ESM, JSDoc). Deliverability is proven by the confirmation link, not by syntax. The check exists only to catch obvious typos before sending.",
+    "decision_type": "implementation",
+    "risk_level": "low",
+    "proposed_solution": "Replace the strict regex with a minimal plausibility check (an '@' with text on both sides, no whitespace) and rely on the confirmation email as the real validation. Tests cover the reported addresses and obvious typos.\n\nPatch (already applied in the repository snapshot):\n```diff\n--- a/src/email.js\n+++ b/src/email.js\n@@ -1,6 +1,13 @@\n // @ts-check\n \n-/** @param {string} email */\n+/**\n+ * Deliberately loose: one \"@\" with something on both sides and no whitespace.\n+ * The address is proven by the confirmation email we send next; this check only catches typos\n+ * like a missing \"@\". Strict regexes rejected real customers (uppercase, IDN domains, \"+tags\",\n+ * new TLDs) - see the task context.\n+ * @param {string} email\n+ */\n export function isPlausibleEmail(email) {\n-  return /^[a-z0-9._%+-]+@[a-z0-9.-]+\\.[a-z]{2,}$/.test(email);\n+  const at = email.lastIndexOf(\"@\");\n+  return at > 0 && at < email.length - 1 && !/\\s/.test(email);\n }\n--- a/test/email.test.js\n+++ b/test/email.test.js\n@@ -2,6 +2,10 @@\n import assert from \"node:assert/strict\";\n import { isPlausibleEmail } from \"../src/email.js\";\n \n-test(\"accepts a normal address\", () => {\n-  assert.equal(isPlausibleEmail(\"ann@example.com\"), true);\n+test(\"accepts real-world addresses\", () => {\n+  for (const e of [\"ann@example.com\", \"Ann.Lee@Example.COM\", \"a+tag@sub.example.co.uk\", \"josé@bücher.de\", \"x@localhost.dev\", \"o'brien@example.ie\"]) assert.equal(isPlausibleEmail(e), true, e);\n });\n+\n+test(\"rejects obvious typos\", () => {\n+  for (const e of [\"\", \"annexample.com\", \"@example.com\", \"ann@\", \"ann @example.com\"]) assert.equal(isPlausibleEmail(e), false, e);\n+});\n```"
+  },
+  "ground_truth": {
+    "proposal_status": "correct",
+    "acceptable_verdicts": [
+      "KEEP"
+    ],
+    "defect_kind": "none",
+    "mechanically_confirmable": false,
+    "material_issue": "",
+    "required_observations": [],
+    "notes": "Tempting nitpick: demanding RFC 5322 validation, a validator library, or MX lookups, although the confirmation email is the real validation and strictness caused the bug."
+  }
+}
