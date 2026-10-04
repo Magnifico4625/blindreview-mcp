@@ -4,7 +4,8 @@ import { isFlawed, loadCases, toReviewInput, type BenchmarkCase } from "../bench
 import { exportSheet, ingestSheet, parseCsv } from "../benchmark/human-review.js";
 import { computeModeMetrics, type RunRecord } from "../benchmark/metrics.js";
 import { toExperimentMarkdown, toMarkdown } from "../benchmark/report.js";
-import { DEFAULT_MODES, fileTimestamp, runBenchmark } from "../benchmark/runner.js";
+import { DEFAULT_MODES, fileTimestamp, RateLimitStop, runBenchmark } from "../benchmark/runner.js";
+import { ThrottledProvider } from "../benchmark/throttle.js";
 import { pairedBootstrapDiff, rng, shuffle, spread, wilson } from "../benchmark/stats.js";
 import { signalLabel } from "../benchmark/thresholds.js";
 import { findProjectRoot } from "../src/config.js";
@@ -153,6 +154,39 @@ describe("runner", () => {
     expect(resumed.records).toHaveLength(full.records.length);
     const calls = (m: string) => ({ proposal_first: 1, decision_judge: 1 })[m] ?? 2;
     expect(provider.requests).toHaveLength(full.records.slice(0).reduce((n, r) => n + calls(r.mode), 0) - saved.slice(0, 10).reduce((n, r) => n + calls(r.mode), 0));
+  });
+
+  it("stops on persistent HTTP 429 without recording it; resume re-runs transient failures", async () => {
+    const { cases } = await loadCases(casesDir);
+    let calls = 0;
+    const limited = new FakeProvider(() => {
+      calls++;
+      if (calls > 3) throw new ReviewError("PROVIDER_HTTP_ERROR", "rate limited", { status: 429 });
+      return JSON.stringify(validVerdict);
+    });
+    const saved: RunRecord[] = [];
+    const opts = { label: "t", modes: ["proposal_first"] as const, runs: 1, caseSetHash: "x", retries: 1, retryDelayMs: 1 };
+    await expect(runBenchmark(cases.slice(0, 6), testConfig, { ...opts, provider: limited, stopOnRateLimit: true, onRecord: (r) => void saved.push(r) })).rejects.toBeInstanceOf(RateLimitStop);
+    expect(saved).toHaveLength(3);
+    expect(saved.every((r) => r.ok)).toBe(true);
+    const timeout = { ...saved[0]!, case_id: cases[3]!.id, ok: false, result: undefined, error: { code: "TIMEOUT", message: "t" } };
+    const provider = answer();
+    const resumed = await runBenchmark(cases.slice(0, 6), testConfig, { ...opts, provider, resumeRecords: [...saved, timeout] });
+    expect(resumed.records).toHaveLength(6);
+    expect(provider.requests).toHaveLength(3); // the TIMEOUT record is re-run, the 3 successes are reused
+  });
+
+  it("throttle limits request starts per rolling minute and counts calls", async () => {
+    let t = 0;
+    const slept: number[] = [];
+    const p = new ThrottledProvider(answer(), 2, () => t, async (ms) => {
+      slept.push(ms);
+      t += ms;
+    });
+    const req = { messages: [{ role: "user" as const, content: "x" }], maxTokens: 10, signal: new AbortController().signal };
+    await Promise.all([p.complete(req), p.complete(req), p.complete(req)]);
+    expect(p.calls).toBe(3);
+    expect(slept).toEqual([60_010]);
   });
 
   it("mode order is shuffled reproducibly", async () => {

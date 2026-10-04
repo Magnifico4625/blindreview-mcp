@@ -26,7 +26,7 @@ export interface RunRecord {
   retries: Array<{ code: string; message: string }>;
   ok: boolean;
   result?: ReviewResult;
-  error?: { code: string; message: string };
+  error?: { code: string; message: string; status?: number };
   /** Tokens of the final attempt (successful or not) plus all retried attempts. */
   usage_all_attempts: Usage;
   latency_ms: number;

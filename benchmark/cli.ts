@@ -8,7 +8,8 @@ import { DEFAULT_CASES_DIR, loadCases } from "./cases.js";
 import { exportSheet } from "./human-review.js";
 import { toExperimentMarkdown, toMarkdown } from "./report.js";
 import type { RunRecord } from "./metrics.js";
-import { DEFAULT_MODES, fileTimestamp, runBenchmark } from "./runner.js";
+import { DEFAULT_MODES, fileTimestamp, RateLimitStop, runBenchmark } from "./runner.js";
+import { ThrottledProvider } from "./throttle.js";
 
 const USAGE = `Usage: npm run benchmark -- [casesDir] [options]   (default casesDir: ${DEFAULT_CASES_DIR})
   --label NAME              results go to <out>/<label>/ (required for clarity; default: model id)
@@ -19,6 +20,8 @@ const USAGE = `Usage: npm run benchmark -- [casesDir] [options]   (default cases
   --concurrency N           parallel (case, run) units (default: BENCHMARK_CONCURRENCY or 2)
   --retries N               retries per review on transient errors (default 2)
   --out DIR                 default benchmark-results
+  --max-rpm N               at most N provider requests per minute (default: BENCHMARK_MAX_RPM or unlimited)
+  --stop-on-rate-limit      stop (resumable) instead of recording failures when HTTP 429 persists after retries
   --resume                  reuse finished records from <out>/<label>/checkpoint.jsonl (same model/config/cases)
                             (every finished record is always appended to that checkpoint file)
   Provider config (override env): --base-url --model --reasoning-effort --reasoning-param
@@ -45,11 +48,11 @@ function int(name: string, v: string | undefined, fallback: number): number {
 
 async function main(): Promise<void> {
   const options = Object.fromEntries(
-    ["label", "runs", "modes", "only", "seed", "concurrency", "retries", "out", ...Object.keys(FLAG_ENV)].map((k) => [k, { type: "string" as const }]),
+    ["label", "runs", "modes", "only", "seed", "concurrency", "retries", "out", "max-rpm", ...Object.keys(FLAG_ENV)].map((k) => [k, { type: "string" as const }]),
   );
   const { values, positionals } = parseArgs({
     allowPositionals: true,
-    options: { ...options, help: { type: "boolean", short: "h" }, resume: { type: "boolean" } },
+    options: { ...options, help: { type: "boolean", short: "h" }, resume: { type: "boolean" }, "stop-on-rate-limit": { type: "boolean" } },
   });
   const v = values as Record<string, string | boolean | undefined>;
   if (v.help) {
@@ -102,6 +105,7 @@ async function main(): Promise<void> {
   if (v.resume && !resumeRecords.length) await writeFile(checkpoint, `${JSON.stringify(header)}\n`, "utf8");
 
   console.log(`[${label}] ${cases.length} cases x ${modes.join(", ")} x ${runs} runs, model ${config.model}, concurrency ${concurrency}`);
+  const throttled = new ThrottledProvider(buildProvider(config), int("--max-rpm", v["max-rpm"] as string | undefined, int("BENCHMARK_MAX_RPM", process.env.BENCHMARK_MAX_RPM, 0)));
   const report = await runBenchmark(cases, config, {
     label,
     modes,
@@ -110,11 +114,16 @@ async function main(): Promise<void> {
     concurrency,
     retries: int("--retries", v.retries as string | undefined, 2),
     caseSetHash,
-    provider: buildProvider(config),
+    provider: throttled,
+    stopOnRateLimit: Boolean(v["stop-on-rate-limit"]),
     log: (m) => console.log(m),
     resumeRecords,
     onRecord: (r) => appendFile(checkpoint, `${JSON.stringify(r)}\n`, "utf8"),
+  }).catch((err: unknown) => {
+    if (err instanceof RateLimitStop) console.log(`provider requests this session: ${throttled.calls}`);
+    throw err;
   });
+  console.log(`provider requests this session: ${throttled.calls}`);
   const base = path.join(outDir, fileTimestamp(new Date(report.created_at)));
   await writeFile(`${base}.json`, `${JSON.stringify(report, null, 2)}\n`, "utf8");
   await writeFile(`${base}.md`, toMarkdown(report), "utf8");

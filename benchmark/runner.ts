@@ -29,6 +29,25 @@ export interface BenchmarkOptions {
   onRecord?: (record: RunRecord) => void | Promise<void>;
   /** Records from an interrupted run (same config); their (case, run, mode) keys are not re-run. */
   resumeRecords?: RunRecord[];
+  /**
+   * Stop starting new work when a review finally fails with HTTP 429 (e.g. a daily free-model cap).
+   * The 429 record is not kept/checkpointed; runBenchmark then throws RateLimitStop so the run can be resumed.
+   */
+  stopOnRateLimit?: boolean;
+}
+
+export class RateLimitStop extends Error {
+  constructor(
+    readonly completed: number,
+    readonly expected: number,
+  ) {
+    super(`stopped on HTTP 429 after ${completed}/${expected} records; rerun with --resume later`);
+  }
+}
+
+/** Records worth reusing on resume: successes and non-transient failures (transient failures are re-run). */
+export function reusableOnResume(r: RunRecord): boolean {
+  return r.ok || !(r.error && (TRANSIENT_CODES.has(r.error.code) || r.error.status === 429 || (r.error.status ?? 0) >= 500));
 }
 
 export interface BenchmarkReport {
@@ -132,11 +151,12 @@ export async function runBenchmark(cases: BenchmarkCase[], config: Config, optio
         const e = err instanceof ReviewError ? err : new ReviewError("INTERNAL_ERROR", String(err));
         record.usage_all_attempts = addUsage(record.usage_all_attempts, e.usage);
         record.latency_ms = Math.round(performance.now() - started);
-        const info = { code: e.code, message: e.message.slice(0, 300) };
+        const info = { code: e.code, message: e.message.slice(0, 300), ...(e.status !== undefined ? { status: e.status } : {}) };
         if (attempt < retries && isTransient(e)) {
           record.retries.push(info);
           log(`  retry ${attempt + 1}/${retries} ${c.id} run${run} [${mode}] after ${e.code}`);
-          await new Promise((r) => setTimeout(r, retryDelayMs * (attempt + 1)));
+          // 429 (per-minute limits) gets a 6x longer backoff than timeouts / 5xx.
+          await new Promise((r) => setTimeout(r, retryDelayMs * (attempt + 1) * (e.status === 429 ? 6 : 1)));
           continue;
         }
         record.error = info;
@@ -152,19 +172,26 @@ export async function runBenchmark(cases: BenchmarkCase[], config: Config, optio
   const known = new Set(units.flatMap((u) => modes.map((m) => key(u.c.id, u.run, m))));
   for (const r of options.resumeRecords ?? []) {
     const k = key(r.case_id, r.run, r.mode);
-    if (known.has(k) && !done.has(k)) {
+    if (known.has(k) && !done.has(k) && reusableOnResume(r)) {
       done.add(k);
       records.push(r);
     }
   }
   if (done.size) log(`resuming: ${done.size} records reused from checkpoint`);
   let next = 0;
+  let stopped = false;
   const worker = async () => {
-    while (next < units.length) {
+    while (next < units.length && !stopped) {
       const unit = units[next++] as (typeof units)[number];
       for (const mode of unit.order) {
         if (done.has(key(unit.c.id, unit.run, mode))) continue;
+        if (stopped) break;
         const r = await reviewWithRetries(unit.c, unit.run, mode);
+        if (options.stopOnRateLimit && r.error?.status === 429) {
+          stopped = true;
+          log(`${unit.c.id} run${unit.run} [${mode}] HTTP 429 after retries: stopping (record not kept)`);
+          break;
+        }
         records.push(r);
         await options.onRecord?.(r);
         log(
@@ -174,6 +201,7 @@ export async function runBenchmark(cases: BenchmarkCase[], config: Config, optio
     }
   };
   await Promise.all(Array.from({ length: Math.max(1, options.concurrency ?? 1) }, worker));
+  if (stopped) throw new RateLimitStop(records.length, units.length * modes.length);
   records.sort((a, b) => a.case_id.localeCompare(b.case_id) || a.run - b.run || a.mode.localeCompare(b.mode));
 
   const comparisons: Comparison[] = [];

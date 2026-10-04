@@ -12,7 +12,7 @@ No new product features; the MCP tool surface (`review_decision` with `blind_fir
 - Statistics: Wilson CIs, paired case-bootstrap differences, pre-registered signal labels (`benchmark/thresholds.ts`).
 - Failure accounting (expected / successful / failed / reasons), logged retries for transient errors.
 - Full external config via CLI flags and env; results under `benchmark-results/<label>/` with model, config, git SHA, case-set hash and prompt hashes.
-- Checkpoint file per label and `--resume` for interrupted runs.
+- Checkpoint file per label and `--resume` for interrupted runs; `--max-rpm` throttle and `--stop-on-rate-limit` for rate-limited free models.
 - Human review sheet export (mode-blinded CSV) and ingest script; `benchmark:compare` for side-by-side labels.
 
 ## 0.2.0
