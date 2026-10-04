@@ -1,0 +1,981 @@
+{
+  "label": "space-bunny-alpha",
+  "created_at": "2026-10-04T10:46:01.699Z",
+  "items": {
+    "1910554572": {
+      "case_id": "global-waf-rule-push",
+      "run": 3,
+      "mode": "proposal_first_2pass"
+    },
+    "61a9a21609": {
+      "case_id": "api-id-type-change",
+      "run": 1,
+      "mode": "blind_first"
+    },
+    "cf918e34d1": {
+      "case_id": "api-id-type-change",
+      "run": 1,
+      "mode": "decision_judge"
+    },
+    "bedd4f2bf6": {
+      "case_id": "api-id-type-change",
+      "run": 1,
+      "mode": "independent_only"
+    },
+    "e0b6c56700": {
+      "case_id": "api-id-type-change",
+      "run": 1,
+      "mode": "proposal_first"
+    },
+    "60cc00291b": {
+      "case_id": "api-id-type-change",
+      "run": 1,
+      "mode": "proposal_first_2pass"
+    },
+    "7e52c66d43": {
+      "case_id": "api-id-type-change",
+      "run": 2,
+      "mode": "blind_first"
+    },
+    "ebda1468f2": {
+      "case_id": "api-id-type-change",
+      "run": 2,
+      "mode": "decision_judge"
+    },
+    "56681c6a0a": {
+      "case_id": "api-id-type-change",
+      "run": 2,
+      "mode": "independent_only"
+    },
+    "60d2af9534": {
+      "case_id": "api-id-type-change",
+      "run": 2,
+      "mode": "proposal_first"
+    },
+    "d7c334bbfd": {
+      "case_id": "api-id-type-change",
+      "run": 2,
+      "mode": "proposal_first_2pass"
+    },
+    "3a3b2a1421": {
+      "case_id": "api-id-type-change",
+      "run": 3,
+      "mode": "blind_first"
+    },
+    "fbd33175af": {
+      "case_id": "api-id-type-change",
+      "run": 3,
+      "mode": "decision_judge"
+    },
+    "320a30b903": {
+      "case_id": "api-id-type-change",
+      "run": 3,
+      "mode": "independent_only"
+    },
+    "c354def7e7": {
+      "case_id": "api-id-type-change",
+      "run": 3,
+      "mode": "proposal_first"
+    },
+    "e0a9901a57": {
+      "case_id": "api-id-type-change",
+      "run": 3,
+      "mode": "proposal_first_2pass"
+    },
+    "3ad9dac28f": {
+      "case_id": "authz-cache-ttl",
+      "run": 1,
+      "mode": "blind_first"
+    },
+    "da9e4c9dd2": {
+      "case_id": "authz-cache-ttl",
+      "run": 1,
+      "mode": "decision_judge"
+    },
+    "f9ca9106c7": {
+      "case_id": "authz-cache-ttl",
+      "run": 1,
+      "mode": "independent_only"
+    },
+    "1b1b023d87": {
+      "case_id": "authz-cache-ttl",
+      "run": 1,
+      "mode": "proposal_first"
+    },
+    "61cab08f32": {
+      "case_id": "authz-cache-ttl",
+      "run": 1,
+      "mode": "proposal_first_2pass"
+    },
+    "e787677cc9": {
+      "case_id": "authz-cache-ttl",
+      "run": 2,
+      "mode": "blind_first"
+    },
+    "af76c2e393": {
+      "case_id": "authz-cache-ttl",
+      "run": 2,
+      "mode": "decision_judge"
+    },
+    "6846ad9016": {
+      "case_id": "authz-cache-ttl",
+      "run": 2,
+      "mode": "independent_only"
+    },
+    "65108c61f0": {
+      "case_id": "authz-cache-ttl",
+      "run": 2,
+      "mode": "proposal_first"
+    },
+    "6e8fe622fd": {
+      "case_id": "authz-cache-ttl",
+      "run": 2,
+      "mode": "proposal_first_2pass"
+    },
+    "d3029291e1": {
+      "case_id": "authz-cache-ttl",
+      "run": 3,
+      "mode": "blind_first"
+    },
+    "535eb1bc93": {
+      "case_id": "authz-cache-ttl",
+      "run": 3,
+      "mode": "decision_judge"
+    },
+    "4de3e73223": {
+      "case_id": "authz-cache-ttl",
+      "run": 3,
+      "mode": "independent_only"
+    },
+    "0b906fee70": {
+      "case_id": "authz-cache-ttl",
+      "run": 3,
+      "mode": "proposal_first"
+    },
+    "84e1d36bff": {
+      "case_id": "authz-cache-ttl",
+      "run": 3,
+      "mode": "proposal_first_2pass"
+    },
+    "6c8f0c36d8": {
+      "case_id": "autovacuum-disable-hot-table",
+      "run": 1,
+      "mode": "blind_first"
+    },
+    "564b6c30fc": {
+      "case_id": "autovacuum-disable-hot-table",
+      "run": 1,
+      "mode": "decision_judge"
+    },
+    "598433a269": {
+      "case_id": "autovacuum-disable-hot-table",
+      "run": 1,
+      "mode": "independent_only"
+    },
+    "7723a90f8b": {
+      "case_id": "autovacuum-disable-hot-table",
+      "run": 1,
+      "mode": "proposal_first"
+    },
+    "9707d2d5b3": {
+      "case_id": "autovacuum-disable-hot-table",
+      "run": 1,
+      "mode": "proposal_first_2pass"
+    },
+    "19f89333c2": {
+      "case_id": "autovacuum-disable-hot-table",
+      "run": 2,
+      "mode": "blind_first"
+    },
+    "25a27a25cb": {
+      "case_id": "autovacuum-disable-hot-table",
+      "run": 2,
+      "mode": "decision_judge"
+    },
+    "c38309232e": {
+      "case_id": "autovacuum-disable-hot-table",
+      "run": 2,
+      "mode": "independent_only"
+    },
+    "03a1be976f": {
+      "case_id": "autovacuum-disable-hot-table",
+      "run": 2,
+      "mode": "proposal_first"
+    },
+    "627163a84f": {
+      "case_id": "autovacuum-disable-hot-table",
+      "run": 2,
+      "mode": "proposal_first_2pass"
+    },
+    "315fbf3de0": {
+      "case_id": "autovacuum-disable-hot-table",
+      "run": 3,
+      "mode": "blind_first"
+    },
+    "378322569a": {
+      "case_id": "autovacuum-disable-hot-table",
+      "run": 3,
+      "mode": "decision_judge"
+    },
+    "059536ae2e": {
+      "case_id": "autovacuum-disable-hot-table",
+      "run": 3,
+      "mode": "independent_only"
+    },
+    "b304539781": {
+      "case_id": "autovacuum-disable-hot-table",
+      "run": 3,
+      "mode": "proposal_first"
+    },
+    "78a7682cf8": {
+      "case_id": "autovacuum-disable-hot-table",
+      "run": 3,
+      "mode": "proposal_first_2pass"
+    },
+    "1cfe10d00c": {
+      "case_id": "billing-big-bang-refactor",
+      "run": 1,
+      "mode": "blind_first"
+    },
+    "ec1d118121": {
+      "case_id": "billing-big-bang-refactor",
+      "run": 1,
+      "mode": "decision_judge"
+    },
+    "45760fb5e4": {
+      "case_id": "billing-big-bang-refactor",
+      "run": 1,
+      "mode": "independent_only"
+    },
+    "7ceeced729": {
+      "case_id": "billing-big-bang-refactor",
+      "run": 1,
+      "mode": "proposal_first"
+    },
+    "9abca34206": {
+      "case_id": "billing-big-bang-refactor",
+      "run": 1,
+      "mode": "proposal_first_2pass"
+    },
+    "ee499f97f7": {
+      "case_id": "billing-big-bang-refactor",
+      "run": 2,
+      "mode": "blind_first"
+    },
+    "cbcfa80fff": {
+      "case_id": "billing-big-bang-refactor",
+      "run": 2,
+      "mode": "decision_judge"
+    },
+    "ddda7e5047": {
+      "case_id": "billing-big-bang-refactor",
+      "run": 2,
+      "mode": "independent_only"
+    },
+    "c3d386e1cc": {
+      "case_id": "billing-big-bang-refactor",
+      "run": 2,
+      "mode": "proposal_first"
+    },
+    "acc38b6f77": {
+      "case_id": "billing-big-bang-refactor",
+      "run": 2,
+      "mode": "proposal_first_2pass"
+    },
+    "81459ef299": {
+      "case_id": "billing-big-bang-refactor",
+      "run": 3,
+      "mode": "blind_first"
+    },
+    "3ecbabbbed": {
+      "case_id": "billing-big-bang-refactor",
+      "run": 3,
+      "mode": "decision_judge"
+    },
+    "da0556006c": {
+      "case_id": "billing-big-bang-refactor",
+      "run": 3,
+      "mode": "independent_only"
+    },
+    "d0dd8e215d": {
+      "case_id": "billing-big-bang-refactor",
+      "run": 3,
+      "mode": "proposal_first"
+    },
+    "4f1e2d489f": {
+      "case_id": "billing-big-bang-refactor",
+      "run": 3,
+      "mode": "proposal_first_2pass"
+    },
+    "a45293b2ba": {
+      "case_id": "bulk-site-deletion-script",
+      "run": 1,
+      "mode": "blind_first"
+    },
+    "1fbf767286": {
+      "case_id": "bulk-site-deletion-script",
+      "run": 1,
+      "mode": "decision_judge"
+    },
+    "0879e2cfe4": {
+      "case_id": "bulk-site-deletion-script",
+      "run": 1,
+      "mode": "independent_only"
+    },
+    "aa036a21d9": {
+      "case_id": "bulk-site-deletion-script",
+      "run": 1,
+      "mode": "proposal_first"
+    },
+    "9039ce829d": {
+      "case_id": "bulk-site-deletion-script",
+      "run": 1,
+      "mode": "proposal_first_2pass"
+    },
+    "ccbf246328": {
+      "case_id": "bulk-site-deletion-script",
+      "run": 2,
+      "mode": "blind_first"
+    },
+    "deb599a575": {
+      "case_id": "bulk-site-deletion-script",
+      "run": 2,
+      "mode": "decision_judge"
+    },
+    "032bdc7e2f": {
+      "case_id": "bulk-site-deletion-script",
+      "run": 2,
+      "mode": "independent_only"
+    },
+    "ad0d76fb40": {
+      "case_id": "bulk-site-deletion-script",
+      "run": 2,
+      "mode": "proposal_first"
+    },
+    "3faa7377ee": {
+      "case_id": "bulk-site-deletion-script",
+      "run": 2,
+      "mode": "proposal_first_2pass"
+    },
+    "2c4912ace7": {
+      "case_id": "bulk-site-deletion-script",
+      "run": 3,
+      "mode": "blind_first"
+    },
+    "5772e55836": {
+      "case_id": "bulk-site-deletion-script",
+      "run": 3,
+      "mode": "decision_judge"
+    },
+    "f0ec9355ec": {
+      "case_id": "bulk-site-deletion-script",
+      "run": 3,
+      "mode": "independent_only"
+    },
+    "bb5b124a9b": {
+      "case_id": "bulk-site-deletion-script",
+      "run": 3,
+      "mode": "proposal_first"
+    },
+    "acdf6a09f5": {
+      "case_id": "bulk-site-deletion-script",
+      "run": 3,
+      "mode": "proposal_first_2pass"
+    },
+    "ab92def229": {
+      "case_id": "coupon-double-redeem",
+      "run": 1,
+      "mode": "blind_first"
+    },
+    "137a7c24ae": {
+      "case_id": "coupon-double-redeem",
+      "run": 1,
+      "mode": "decision_judge"
+    },
+    "44e9a2506d": {
+      "case_id": "coupon-double-redeem",
+      "run": 1,
+      "mode": "independent_only"
+    },
+    "09c87a018f": {
+      "case_id": "coupon-double-redeem",
+      "run": 1,
+      "mode": "proposal_first"
+    },
+    "a85382c2d2": {
+      "case_id": "coupon-double-redeem",
+      "run": 1,
+      "mode": "proposal_first_2pass"
+    },
+    "3f256b8927": {
+      "case_id": "coupon-double-redeem",
+      "run": 2,
+      "mode": "blind_first"
+    },
+    "3444062c26": {
+      "case_id": "coupon-double-redeem",
+      "run": 2,
+      "mode": "decision_judge"
+    },
+    "99693f8c89": {
+      "case_id": "coupon-double-redeem",
+      "run": 2,
+      "mode": "independent_only"
+    },
+    "10b28dd147": {
+      "case_id": "coupon-double-redeem",
+      "run": 2,
+      "mode": "proposal_first"
+    },
+    "e647dfb368": {
+      "case_id": "coupon-double-redeem",
+      "run": 2,
+      "mode": "proposal_first_2pass"
+    },
+    "9aa573aa05": {
+      "case_id": "coupon-double-redeem",
+      "run": 3,
+      "mode": "blind_first"
+    },
+    "e5d5e6e912": {
+      "case_id": "coupon-double-redeem",
+      "run": 3,
+      "mode": "decision_judge"
+    },
+    "dab43ea311": {
+      "case_id": "coupon-double-redeem",
+      "run": 3,
+      "mode": "independent_only"
+    },
+    "0cdd997025": {
+      "case_id": "coupon-double-redeem",
+      "run": 3,
+      "mode": "proposal_first"
+    },
+    "8cfd8dd2f6": {
+      "case_id": "coupon-double-redeem",
+      "run": 3,
+      "mode": "proposal_first_2pass"
+    },
+    "fd616609ea": {
+      "case_id": "cross-region-auto-failover",
+      "run": 1,
+      "mode": "blind_first"
+    },
+    "363841baf6": {
+      "case_id": "cross-region-auto-failover",
+      "run": 1,
+      "mode": "decision_judge"
+    },
+    "2ae55e20df": {
+      "case_id": "cross-region-auto-failover",
+      "run": 1,
+      "mode": "independent_only"
+    },
+    "0d5bee5738": {
+      "case_id": "cross-region-auto-failover",
+      "run": 1,
+      "mode": "proposal_first"
+    },
+    "d767956a9e": {
+      "case_id": "cross-region-auto-failover",
+      "run": 1,
+      "mode": "proposal_first_2pass"
+    },
+    "5ec0c14495": {
+      "case_id": "cross-region-auto-failover",
+      "run": 2,
+      "mode": "blind_first"
+    },
+    "f28f73fe16": {
+      "case_id": "cross-region-auto-failover",
+      "run": 2,
+      "mode": "decision_judge"
+    },
+    "90f1cd519a": {
+      "case_id": "cross-region-auto-failover",
+      "run": 2,
+      "mode": "independent_only"
+    },
+    "b32db99036": {
+      "case_id": "cross-region-auto-failover",
+      "run": 2,
+      "mode": "proposal_first"
+    },
+    "41ac037add": {
+      "case_id": "cross-region-auto-failover",
+      "run": 2,
+      "mode": "proposal_first_2pass"
+    },
+    "34bda24149": {
+      "case_id": "cross-region-auto-failover",
+      "run": 3,
+      "mode": "blind_first"
+    },
+    "4c8cf84c8c": {
+      "case_id": "cross-region-auto-failover",
+      "run": 3,
+      "mode": "decision_judge"
+    },
+    "d08b5b0f4a": {
+      "case_id": "cross-region-auto-failover",
+      "run": 3,
+      "mode": "independent_only"
+    },
+    "01a8d69ba0": {
+      "case_id": "cross-region-auto-failover",
+      "run": 3,
+      "mode": "proposal_first"
+    },
+    "d16630c81c": {
+      "case_id": "cross-region-auto-failover",
+      "run": 3,
+      "mode": "proposal_first_2pass"
+    },
+    "980743b131": {
+      "case_id": "global-waf-rule-push",
+      "run": 1,
+      "mode": "blind_first"
+    },
+    "1ccac81d85": {
+      "case_id": "global-waf-rule-push",
+      "run": 1,
+      "mode": "decision_judge"
+    },
+    "6a11dd70cb": {
+      "case_id": "global-waf-rule-push",
+      "run": 1,
+      "mode": "independent_only"
+    },
+    "d111d7f019": {
+      "case_id": "global-waf-rule-push",
+      "run": 1,
+      "mode": "proposal_first"
+    },
+    "35fe0e039c": {
+      "case_id": "global-waf-rule-push",
+      "run": 1,
+      "mode": "proposal_first_2pass"
+    },
+    "9bd0c77ee5": {
+      "case_id": "global-waf-rule-push",
+      "run": 2,
+      "mode": "blind_first"
+    },
+    "fa275b3973": {
+      "case_id": "global-waf-rule-push",
+      "run": 2,
+      "mode": "decision_judge"
+    },
+    "540fd5b758": {
+      "case_id": "global-waf-rule-push",
+      "run": 2,
+      "mode": "independent_only"
+    },
+    "88b1f41037": {
+      "case_id": "global-waf-rule-push",
+      "run": 2,
+      "mode": "proposal_first"
+    },
+    "1e7d1ef9e1": {
+      "case_id": "global-waf-rule-push",
+      "run": 2,
+      "mode": "proposal_first_2pass"
+    },
+    "083289f1cf": {
+      "case_id": "global-waf-rule-push",
+      "run": 3,
+      "mode": "blind_first"
+    },
+    "eab8c15e98": {
+      "case_id": "global-waf-rule-push",
+      "run": 3,
+      "mode": "decision_judge"
+    },
+    "bc9d816f53": {
+      "case_id": "global-waf-rule-push",
+      "run": 3,
+      "mode": "independent_only"
+    },
+    "efebf45ad4": {
+      "case_id": "global-waf-rule-push",
+      "run": 3,
+      "mode": "proposal_first"
+    },
+    "d70d414aa5": {
+      "case_id": "orders-column-migration",
+      "run": 1,
+      "mode": "blind_first"
+    },
+    "ce435d22cb": {
+      "case_id": "orders-column-migration",
+      "run": 1,
+      "mode": "decision_judge"
+    },
+    "8502ad51d1": {
+      "case_id": "orders-column-migration",
+      "run": 1,
+      "mode": "independent_only"
+    },
+    "2e62bd8c07": {
+      "case_id": "orders-column-migration",
+      "run": 1,
+      "mode": "proposal_first"
+    },
+    "6ad5a43260": {
+      "case_id": "orders-column-migration",
+      "run": 1,
+      "mode": "proposal_first_2pass"
+    },
+    "81d62a6821": {
+      "case_id": "orders-column-migration",
+      "run": 2,
+      "mode": "blind_first"
+    },
+    "5c2b4841db": {
+      "case_id": "orders-column-migration",
+      "run": 2,
+      "mode": "decision_judge"
+    },
+    "5389ece10c": {
+      "case_id": "orders-column-migration",
+      "run": 2,
+      "mode": "independent_only"
+    },
+    "2ac3b1e964": {
+      "case_id": "orders-column-migration",
+      "run": 2,
+      "mode": "proposal_first"
+    },
+    "c7bfdd1c1d": {
+      "case_id": "orders-column-migration",
+      "run": 2,
+      "mode": "proposal_first_2pass"
+    },
+    "226e3bb202": {
+      "case_id": "orders-column-migration",
+      "run": 3,
+      "mode": "blind_first"
+    },
+    "d0649ccd13": {
+      "case_id": "orders-column-migration",
+      "run": 3,
+      "mode": "decision_judge"
+    },
+    "b53bfaae52": {
+      "case_id": "orders-column-migration",
+      "run": 3,
+      "mode": "independent_only"
+    },
+    "899ac620cd": {
+      "case_id": "orders-column-migration",
+      "run": 3,
+      "mode": "proposal_first"
+    },
+    "c0a1beb17c": {
+      "case_id": "orders-column-migration",
+      "run": 3,
+      "mode": "proposal_first_2pass"
+    },
+    "6349179cb4": {
+      "case_id": "queue-swap-redis-pubsub",
+      "run": 1,
+      "mode": "blind_first"
+    },
+    "9977c9a838": {
+      "case_id": "queue-swap-redis-pubsub",
+      "run": 1,
+      "mode": "decision_judge"
+    },
+    "3e4a00f24c": {
+      "case_id": "queue-swap-redis-pubsub",
+      "run": 1,
+      "mode": "independent_only"
+    },
+    "0ddbf6e8c1": {
+      "case_id": "queue-swap-redis-pubsub",
+      "run": 1,
+      "mode": "proposal_first"
+    },
+    "0d2559ebf1": {
+      "case_id": "queue-swap-redis-pubsub",
+      "run": 1,
+      "mode": "proposal_first_2pass"
+    },
+    "2e94ee0589": {
+      "case_id": "queue-swap-redis-pubsub",
+      "run": 2,
+      "mode": "blind_first"
+    },
+    "ed35c42f5d": {
+      "case_id": "queue-swap-redis-pubsub",
+      "run": 2,
+      "mode": "decision_judge"
+    },
+    "bb28222a8b": {
+      "case_id": "queue-swap-redis-pubsub",
+      "run": 2,
+      "mode": "independent_only"
+    },
+    "c7bd1d96a8": {
+      "case_id": "queue-swap-redis-pubsub",
+      "run": 2,
+      "mode": "proposal_first"
+    },
+    "df6f724351": {
+      "case_id": "queue-swap-redis-pubsub",
+      "run": 2,
+      "mode": "proposal_first_2pass"
+    },
+    "c68474d5f2": {
+      "case_id": "queue-swap-redis-pubsub",
+      "run": 3,
+      "mode": "blind_first"
+    },
+    "c76f1afa49": {
+      "case_id": "queue-swap-redis-pubsub",
+      "run": 3,
+      "mode": "decision_judge"
+    },
+    "52eb1a006e": {
+      "case_id": "queue-swap-redis-pubsub",
+      "run": 3,
+      "mode": "independent_only"
+    },
+    "53d4c4afcf": {
+      "case_id": "queue-swap-redis-pubsub",
+      "run": 3,
+      "mode": "proposal_first"
+    },
+    "5554cc1f21": {
+      "case_id": "queue-swap-redis-pubsub",
+      "run": 3,
+      "mode": "proposal_first_2pass"
+    },
+    "afc012e92b": {
+      "case_id": "quota-system-migration",
+      "run": 1,
+      "mode": "blind_first"
+    },
+    "62527c11ce": {
+      "case_id": "quota-system-migration",
+      "run": 1,
+      "mode": "decision_judge"
+    },
+    "707ab7e5d5": {
+      "case_id": "quota-system-migration",
+      "run": 1,
+      "mode": "independent_only"
+    },
+    "6e73fe8886": {
+      "case_id": "quota-system-migration",
+      "run": 1,
+      "mode": "proposal_first"
+    },
+    "18be6b1045": {
+      "case_id": "quota-system-migration",
+      "run": 1,
+      "mode": "proposal_first_2pass"
+    },
+    "7ce2f57715": {
+      "case_id": "quota-system-migration",
+      "run": 2,
+      "mode": "blind_first"
+    },
+    "2d13c6691c": {
+      "case_id": "quota-system-migration",
+      "run": 2,
+      "mode": "decision_judge"
+    },
+    "fcad5dbedf": {
+      "case_id": "quota-system-migration",
+      "run": 2,
+      "mode": "independent_only"
+    },
+    "ec05fe2e75": {
+      "case_id": "quota-system-migration",
+      "run": 2,
+      "mode": "proposal_first"
+    },
+    "34461e489c": {
+      "case_id": "quota-system-migration",
+      "run": 2,
+      "mode": "proposal_first_2pass"
+    },
+    "ba5a2813b7": {
+      "case_id": "quota-system-migration",
+      "run": 3,
+      "mode": "blind_first"
+    },
+    "7d13e2cd62": {
+      "case_id": "quota-system-migration",
+      "run": 3,
+      "mode": "decision_judge"
+    },
+    "dfe40efab3": {
+      "case_id": "quota-system-migration",
+      "run": 3,
+      "mode": "independent_only"
+    },
+    "8b5511c4f5": {
+      "case_id": "quota-system-migration",
+      "run": 3,
+      "mode": "proposal_first"
+    },
+    "c9da40726b": {
+      "case_id": "quota-system-migration",
+      "run": 3,
+      "mode": "proposal_first_2pass"
+    },
+    "253bbb7d41": {
+      "case_id": "service-discovery-streaming",
+      "run": 1,
+      "mode": "blind_first"
+    },
+    "840e7ba932": {
+      "case_id": "service-discovery-streaming",
+      "run": 1,
+      "mode": "decision_judge"
+    },
+    "82ca8f6154": {
+      "case_id": "service-discovery-streaming",
+      "run": 1,
+      "mode": "independent_only"
+    },
+    "8c0927510d": {
+      "case_id": "service-discovery-streaming",
+      "run": 1,
+      "mode": "proposal_first"
+    },
+    "745b6f2b0e": {
+      "case_id": "service-discovery-streaming",
+      "run": 1,
+      "mode": "proposal_first_2pass"
+    },
+    "204c7706c9": {
+      "case_id": "service-discovery-streaming",
+      "run": 2,
+      "mode": "blind_first"
+    },
+    "ad3be34ead": {
+      "case_id": "service-discovery-streaming",
+      "run": 2,
+      "mode": "decision_judge"
+    },
+    "fc70ef5d42": {
+      "case_id": "service-discovery-streaming",
+      "run": 2,
+      "mode": "independent_only"
+    },
+    "39bdfb7bf7": {
+      "case_id": "service-discovery-streaming",
+      "run": 2,
+      "mode": "proposal_first"
+    },
+    "194d672793": {
+      "case_id": "service-discovery-streaming",
+      "run": 2,
+      "mode": "proposal_first_2pass"
+    },
+    "ac03605a87": {
+      "case_id": "service-discovery-streaming",
+      "run": 3,
+      "mode": "blind_first"
+    },
+    "968f63a8ae": {
+      "case_id": "service-discovery-streaming",
+      "run": 3,
+      "mode": "decision_judge"
+    },
+    "7278e6b55b": {
+      "case_id": "service-discovery-streaming",
+      "run": 3,
+      "mode": "independent_only"
+    },
+    "cafdab337f": {
+      "case_id": "service-discovery-streaming",
+      "run": 3,
+      "mode": "proposal_first"
+    },
+    "589e8f32a4": {
+      "case_id": "service-discovery-streaming",
+      "run": 3,
+      "mode": "proposal_first_2pass"
+    },
+    "89789a0108": {
+      "case_id": "trading-flag-reuse",
+      "run": 1,
+      "mode": "blind_first"
+    },
+    "b073c2a9e1": {
+      "case_id": "trading-flag-reuse",
+      "run": 1,
+      "mode": "decision_judge"
+    },
+    "296e3dc150": {
+      "case_id": "trading-flag-reuse",
+      "run": 1,
+      "mode": "independent_only"
+    },
+    "d6ab84e327": {
+      "case_id": "trading-flag-reuse",
+      "run": 1,
+      "mode": "proposal_first"
+    },
+    "fd160d98f9": {
+      "case_id": "trading-flag-reuse",
+      "run": 1,
+      "mode": "proposal_first_2pass"
+    },
+    "5b0a64f250": {
+      "case_id": "trading-flag-reuse",
+      "run": 2,
+      "mode": "blind_first"
+    },
+    "6aeff1dd01": {
+      "case_id": "trading-flag-reuse",
+      "run": 2,
+      "mode": "decision_judge"
+    },
+    "d108e53d30": {
+      "case_id": "trading-flag-reuse",
+      "run": 2,
+      "mode": "independent_only"
+    },
+    "03db3296b7": {
+      "case_id": "trading-flag-reuse",
+      "run": 2,
+      "mode": "proposal_first"
+    },
+    "e9b4ea4bd1": {
+      "case_id": "trading-flag-reuse",
+      "run": 2,
+      "mode": "proposal_first_2pass"
+    },
+    "380064c22c": {
+      "case_id": "trading-flag-reuse",
+      "run": 3,
+      "mode": "blind_first"
+    },
+    "b3bd45df8a": {
+      "case_id": "trading-flag-reuse",
+      "run": 3,
+      "mode": "decision_judge"
+    },
+    "12c111c490": {
+      "case_id": "trading-flag-reuse",
+      "run": 3,
+      "mode": "independent_only"
+    },
+    "a21153ab77": {
+      "case_id": "trading-flag-reuse",
+      "run": 3,
+      "mode": "proposal_first"
+    },
+    "d33cbf89f6": {
+      "case_id": "trading-flag-reuse",
+      "run": 3,
+      "mode": "proposal_first_2pass"
+    }
+  }
+}

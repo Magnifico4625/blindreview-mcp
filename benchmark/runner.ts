@@ -103,6 +103,7 @@ export async function runBenchmark(cases: BenchmarkCase[], config: Config, optio
   const retries = Math.max(0, options.retries ?? 2);
   const retryDelayMs = options.retryDelayMs ?? 5000;
   const log = options.log ?? (() => {});
+  const git = gitInfo(); // captured at start: the code that actually runs
   const random = rng(seed);
   const provider = options.provider;
 
@@ -215,7 +216,7 @@ export async function runBenchmark(cases: BenchmarkCase[], config: Config, optio
     schema: "blindreview-benchmark/v3",
     label: options.label,
     created_at: new Date().toISOString(),
-    git: gitInfo(),
+    git,
     provider: provider.name,
     base_url_host: safeHost(config.baseUrl),
     model: provider.model,
