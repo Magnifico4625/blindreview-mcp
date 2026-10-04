@@ -49,7 +49,9 @@
     "benchmark:evidence": "node dist/benchmark/evidence/cli.js",
     "prebenchmark:evidence": "npm run build",
     "benchmark:evidence-summary": "node dist/benchmark/evidence/summary.js",
-    "prebenchmark:evidence-summary": "npm run build"
+    "prebenchmark:evidence-summary": "npm run build",
+    "benchmark:evidence-followup": "node dist/benchmark/evidence/followup.js",
+    "prebenchmark:evidence-followup": "npm run build"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.0",
