@@ -1,0 +1,27 @@
+[qwen3.8-27b-free] 25 cases x proposal_first, proposal_first_2pass, blind_first, independent_only, decision_judge x 3 runs, model qwen/qwen3.8-27b:free, concurrency 2
+authz-cache-ttl run1 [proposal_first] MODIFY tokens=3440 16036ms
+orders-column-migration run1 [independent_only] REPLACE tokens=7679 40629ms
+authz-cache-ttl run1 [decision_judge] MODIFY tokens=2454 37646ms
+  retry 1/2 orders-column-migration run1 [proposal_first_2pass] after PROVIDER_HTTP_ERROR
+authz-cache-ttl run1 [blind_first] MODIFY tokens=7575 81126ms
+  retry 1/2 authz-cache-ttl run1 [proposal_first_2pass] after PROVIDER_HTTP_ERROR
+orders-column-migration run1 [proposal_first_2pass] REPLACE tokens=8235 61656ms (retries: 1)
+orders-column-migration run1 [decision_judge] REPLACE tokens=3452 33182ms
+  retry 1/2 orders-column-migration run1 [blind_first] after PROVIDER_HTTP_ERROR
+  retry 2/2 authz-cache-ttl run1 [proposal_first_2pass] after PROVIDER_HTTP_ERROR
+  retry 2/2 orders-column-migration run1 [blind_first] after PROVIDER_HTTP_ERROR
+authz-cache-ttl run1 [proposal_first_2pass] MODIFY tokens=9771 234233ms (retries: 2)
+orders-column-migration run1 [blind_first] HTTP 429 after retries: stopping (record not kept)
+authz-cache-ttl run1 [independent_only] MODIFY tokens=8315 117448ms
+provider requests this session: 22
+stopped on HTTP 429 after 8/375 records; rerun with --resume later
+[qwen3.8-27b-free] 25 cases x proposal_first, proposal_first_2pass, blind_first, independent_only, decision_judge x 3 runs, model qwen/qwen3.8-27b:free, concurrency 2
+resuming: 8 records reused from checkpoint
+api-id-type-change run1 [blind_first] REPLACE tokens=6911 195452ms
+  retry 1/5 orders-column-migration run1 [blind_first] after TIMEOUT
+  retry 2/5 orders-column-migration run1 [blind_first] after PROVIDER_HTTP_ERROR
+  retry 1/5 api-id-type-change run1 [independent_only] after TIMEOUT
+  retry 2/5 api-id-type-change run1 [independent_only] after PROVIDER_HTTP_ERROR
+  retry 3/5 orders-column-migration run1 [blind_first] after PROVIDER_HTTP_ERROR
+  retry 3/5 api-id-type-change run1 [independent_only] after PROVIDER_HTTP_ERROR
+  retry 4/5 orders-column-migration run1 [blind_first] after PROVIDER_HTTP_ERROR

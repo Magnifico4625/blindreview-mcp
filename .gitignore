@@ -13,3 +13,4 @@ benchmark-results/*
 Thumbs.db
 .tmp-env-*/
 benchmark-results/**/checkpoint.jsonl
+!benchmark-results/sample/qwen3.8-27b-free/checkpoint.jsonl
