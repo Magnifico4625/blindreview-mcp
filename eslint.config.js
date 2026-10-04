@@ -3,7 +3,7 @@ import js from "@eslint/js";
 import tseslint from "typescript-eslint";
 
 export default tseslint.config(
-  { ignores: ["dist/**", "node_modules/**", "benchmark-results/**", "data/**", "coverage/**"] },
+  { ignores: ["dist/**", "node_modules/**", "benchmark-results/**", "data/**", "coverage/**", "benchmark/repo-cases/**", "benchmark/repo-cases-tempting/**"] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {

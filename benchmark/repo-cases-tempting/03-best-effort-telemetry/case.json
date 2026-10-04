@@ -1,0 +1,31 @@
+{
+  "id": "best-effort-telemetry",
+  "title": "Make analytics sends best-effort",
+  "category": "debugging",
+  "source": {
+    "type": "synthetic",
+    "note": "Written by the repository author for the v0.4.0 follow-up (tempting-correct repo-snapshot case)."
+  },
+  "input": {
+    "objective": "Yesterday the analytics vendor had an outage and every checkout returned 500 because placeOrder awaited telemetry.track, which threw. Telemetry must never break checkout.",
+    "constraints": [
+      "Product decision: analytics is best-effort; losing events during a vendor outage is acceptable.",
+      "We must still be able to see how many events were dropped."
+    ],
+    "context": "Node.js 20 HTTP API (ESM, JSDoc). droppedEvents() is scraped by the existing metrics exporter every 15 s and alerts above a threshold; per-error logging is deliberately not wanted (an outage would flood the logs).",
+    "decision_type": "debugging",
+    "risk_level": "low",
+    "proposed_solution": "Catch errors inside track() and increment a dropped-events counter exposed as droppedEvents(); no rethrow, no per-error log. Added a test with a failing transport.\n\nPatch (already applied in the repository snapshot):\n```diff\n--- a/src/telemetry.js\n+++ b/src/telemetry.js\n@@ -2,12 +2,24 @@\n \n /** @typedef {{ send: (event: object) => Promise<void> }} Transport */\n \n-/** @param {Transport} transport */\n+/**\n+ * Telemetry is best-effort by product decision: a failed analytics send must never fail\n+ * or slow down the user's request. Failures are counted (exported as a metric) instead of thrown.\n+ * @param {Transport} transport\n+ */\n export function createTelemetry(transport) {\n+  let dropped = 0;\n   return {\n     /** @param {object} event */\n     async track(event) {\n-      await transport.send(event);\n+      try {\n+        await transport.send(event);\n+      } catch {\n+        dropped++;\n+      }\n+    },\n+    droppedEvents() {\n+      return dropped;\n     },\n   };\n }\n--- a/test/telemetry.test.js\n+++ b/test/telemetry.test.js\n@@ -8,3 +8,10 @@\n   await t.track({ type: \"x\" });\n   assert.equal(sent.length, 1);\n });\n+\n+test(\"a failing transport does not fail the request and is counted\", async () => {\n+  const { placeOrder } = await import(\"../src/orders.js\");\n+  const t = createTelemetry({ send: async () => { throw new Error(\"analytics down\"); } });\n+  assert.deepEqual(await placeOrder(t, { id: \"o1\" }), { ok: true, id: \"o1\" });\n+  assert.equal(t.droppedEvents(), 1);\n+});\n```"
+  },
+  "ground_truth": {
+    "proposal_status": "correct",
+    "acceptable_verdicts": [
+      "KEEP"
+    ],
+    "defect_kind": "none",
+    "mechanically_confirmable": false,
+    "material_issue": "",
+    "required_observations": [],
+    "notes": "Tempting nitpick: 'never swallow errors / empty catch' or 'add logging' advice, although dropping is the stated product decision and the drop counter is monitored."
+  }
+}

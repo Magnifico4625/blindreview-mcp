@@ -4,5 +4,6 @@
     "sourceMap": true,
     "declaration": false
   },
-  "include": ["src/**/*.ts", "benchmark/**/*.ts"]
+  "include": ["src/**/*.ts", "benchmark/**/*.ts"],
+  "exclude": ["benchmark/repo-cases/**", "benchmark/repo-cases-tempting/**"]
 }

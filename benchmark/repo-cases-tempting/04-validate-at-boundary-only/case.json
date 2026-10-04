@@ -1,0 +1,31 @@
+{
+  "id": "validate-at-boundary-only",
+  "title": "Remove duplicated validation from the internal service",
+  "category": "refactor",
+  "source": {
+    "type": "synthetic",
+    "note": "Written by the repository author for the v0.4.0 follow-up (tempting-correct repo-snapshot case)."
+  },
+  "input": {
+    "objective": "Validation rules for subscriptions are duplicated in the HTTP parser and in the service, and they already drifted once (the service accepted quantity 2.5 while HTTP rejected it). Keep a single source of truth.",
+    "constraints": [
+      "Team convention: parse and validate at the boundary, trust types inside the module.",
+      "No behaviour change for HTTP clients."
+    ],
+    "context": "Node.js 20 service (ESM, JSDoc, checkJs strict). createSubscription() is not exported from the package entry point; its only caller is handlePostSubscription() in src/http.js, which runs parseSubscriptionRequest() first.",
+    "decision_type": "refactor",
+    "risk_level": "low",
+    "proposed_solution": "Delete the checks from createSubscription() and document that input is validated at the boundary by parseSubscriptionRequest(). Existing boundary tests cover the rejected inputs.\n\nPatch (already applied in the repository snapshot):\n```diff\n--- a/src/service.js\n+++ b/src/service.js\n@@ -1,8 +1,10 @@\n // @ts-check\n \n-/** @param {{ email: string, quantity: number }} input */\n+/**\n+ * Internal service. Input is already validated by parseSubscriptionRequest() at the HTTP boundary\n+ * (the only caller); see src/http.js. Do not re-validate here.\n+ * @param {{ email: string, quantity: number }} input\n+ */\n export function createSubscription(input) {\n-  if (typeof input.email !== \"string\" || !input.email.includes(\"@\")) throw new Error(\"invalid email\");\n-  if (!Number.isInteger(input.quantity) || input.quantity < 1 || input.quantity > 100) throw new Error(\"invalid quantity\");\n   return { email: input.email.toLowerCase(), quantity: input.quantity, status: \"active\" };\n }\n```"
+  },
+  "ground_truth": {
+    "proposal_status": "correct",
+    "acceptable_verdicts": [
+      "KEEP"
+    ],
+    "defect_kind": "none",
+    "mechanically_confirmable": false,
+    "material_issue": "",
+    "required_observations": [],
+    "notes": "Tempting nitpick: 'missing input validation / defence in depth' advice for an internal function whose only caller already validates."
+  }
+}

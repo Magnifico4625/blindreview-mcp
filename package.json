@@ -1,6 +1,6 @@
 {
   "name": "blindreview-mcp",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "BlindReview MCP: one independent, blind-first reviewer for expensive decisions of AI coding agents.",
   "type": "module",
   "license": "MIT",
@@ -45,7 +45,13 @@
     "benchmark:compare": "node dist/benchmark/compare.js",
     "benchmark:ingest": "node dist/benchmark/ingest.js",
     "prebenchmark:compare": "npm run build",
-    "prebenchmark:ingest": "npm run build"
+    "prebenchmark:ingest": "npm run build",
+    "benchmark:evidence": "node dist/benchmark/evidence/cli.js",
+    "prebenchmark:evidence": "npm run build",
+    "benchmark:evidence-summary": "node dist/benchmark/evidence/summary.js",
+    "prebenchmark:evidence-summary": "npm run build",
+    "benchmark:evidence-followup": "node dist/benchmark/evidence/followup.js",
+    "prebenchmark:evidence-followup": "npm run build"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.0",

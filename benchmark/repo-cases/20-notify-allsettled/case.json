@@ -1,0 +1,31 @@
+{
+  "id": "notify-allsettled",
+  "title": "Stop one failing notification channel from re-sending all channels",
+  "category": "reliability",
+  "source": {
+    "type": "synthetic",
+    "note": "Written by the repository author for v0.4.0 (repo-snapshot case)."
+  },
+  "input": {
+    "objective": "When the SMS gateway is down, customers receive the same 'order shipped' e-mail and push notification 5-6 times, because the failing job is retried as a whole. Stop the duplicates.",
+    "constraints": [
+      "Notifications are best-effort; a lost SMS is acceptable, duplicate e-mails are not (spam complaints).",
+      "Keep the queue/retry infrastructure unchanged."
+    ],
+    "context": "Notification worker (Node.js 20, ESM JavaScript with JSDoc types checked by tsc). notifyAll() fans out to e-mail, SMS and push; the job queue retries a job up to 5 times when the handler rejects.",
+    "decision_type": "debugging",
+    "risk_level": "medium",
+    "proposed_solution": "Use Promise.allSettled instead of Promise.all so one rejected channel no longer rejects the job; failed channels are logged with the injected logger and returned as `failed` for the caller. The job handler passes the logger through. Tests cover the success path and a failing SMS channel.\n\nPatch (already applied in the repository snapshot):\n```diff\n--- a/src/jobs.js\n+++ b/src/jobs.js\n@@ -5,7 +5,8 @@\n  * Queue job handler for \"order shipped\" notifications.\n  * @param {import(\"./notify.js\").Channel[]} channels\n  * @param {{ userId: string, orderId: string }} payload\n+ * @param {import(\"./notify.js\").Logger} logger\n  */\n-export async function onOrderShipped(channels, payload) {\n-  await notifyAll(channels, payload.userId, `Order ${payload.orderId} has shipped`);\n+export async function onOrderShipped(channels, payload, logger) {\n+  await notifyAll(channels, payload.userId, `Order ${payload.orderId} has shipped`, logger);\n }\n--- a/src/notify.js\n+++ b/src/notify.js\n@@ -2,14 +2,29 @@\n \n /**\n  * @typedef {{ name: string, send(userId: string, message: string): Promise<void> }} Channel\n+ * @typedef {{ warn(msg: string, meta: Record<string, unknown>): void }} Logger\n  */\n \n /**\n- * Send a notification on every channel. The job queue retries the whole job if this rejects.\n+ * Send a notification on every channel. A failing channel no longer fails the whole job\n+ * (the job queue used to retry everything, re-sending on the channels that had succeeded).\n+ * Failures are logged and returned so the caller can record them.\n  * @param {Channel[]} channels\n  * @param {string} userId\n  * @param {string} message\n+ * @param {Logger} logger\n+ * @returns {Promise<{ failed: string[] }>}\n  */\n-export async function notifyAll(channels, userId, message) {\n-  await Promise.all(channels.map((c) => c.send(userId, message)));\n+export async function notifyAll(channels, userId, message, logger) {\n+  const results = await Promise.allSettled(channels.map((c) => c.send(userId, message)));\n+  /** @type {string[]} */\n+  const failed = [];\n+  results.forEach((r, i) => {\n+    const channel = channels[i];\n+    if (r.status === \"rejected\" && channel) {\n+      failed.push(channel.name);\n+      logger.warn(\"notification channel failed\", { channel: channel.name, userId, error: String(r.reason) });\n+    }\n+  });\n+  return { failed };\n }\n--- a/test/notify.test.js\n+++ b/test/notify.test.js\n@@ -2,9 +2,23 @@\n import assert from \"node:assert/strict\";\n import { notifyAll } from \"../src/notify.js\";\n \n+const logger = () => { const warnings = []; return { warnings, warn: (m, meta) => warnings.push([m, meta]) }; };\n+\n test(\"sends on every channel\", async () => {\n   const sent = [];\n   const ch = (name) => ({ name, send: async (u, m) => { sent.push([name, u, m]); } });\n-  await notifyAll([ch(\"email\"), ch(\"push\")], \"u1\", \"hi\");\n+  const res = await notifyAll([ch(\"email\"), ch(\"push\")], \"u1\", \"hi\", logger());\n   assert.equal(sent.length, 2);\n+  assert.deepEqual(res, { failed: [] });\n });\n+\n+test(\"one failing channel does not stop or fail the others\", async () => {\n+  const sent = [];\n+  const log = logger();\n+  const ok = (name) => ({ name, send: async () => { sent.push(name); } });\n+  const bad = { name: \"sms\", send: async () => { throw new Error(\"gateway down\"); } };\n+  const res = await notifyAll([ok(\"email\"), bad, ok(\"push\")], \"u1\", \"hi\", log);\n+  assert.deepEqual(sent, [\"email\", \"push\"]);\n+  assert.deepEqual(res, { failed: [\"sms\"] });\n+  assert.equal(log.warnings.length, 1);\n+});\n```"
+  },
+  "ground_truth": {
+    "proposal_status": "correct",
+    "acceptable_verdicts": [
+      "KEEP"
+    ],
+    "defect_kind": "none",
+    "mechanically_confirmable": false,
+    "material_issue": "",
+    "required_observations": [],
+    "notes": "Tempting nitpick: demanding per-channel retries / an outbox for SMS (excluded: best-effort is the stated requirement)."
+  }
+}

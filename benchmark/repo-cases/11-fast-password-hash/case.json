@@ -1,0 +1,35 @@
+{
+  "id": "fast-password-hash",
+  "title": "Replace PBKDF2 with salted SHA-256 to speed up logins",
+  "category": "security",
+  "source": {
+    "type": "synthetic",
+    "note": "Written by the repository author for v0.4.0 (repo-snapshot case)."
+  },
+  "input": {
+    "objective": "Login p95 is 350 ms and profiling shows ~300 ms spent in password hashing. Bring login p95 under 100 ms.",
+    "constraints": [
+      "Users must not be forced to reset passwords.",
+      "No new runtime dependencies."
+    ],
+    "context": "Account service (Node.js 20, ESM JavaScript, WebCrypto). ~4 million user accounts; the users table is replicated to an analytics warehouse that many internal teams can query.",
+    "decision_type": "security",
+    "risk_level": "critical",
+    "proposed_solution": "Switch new password hashes to salted SHA-256 (16-byte random salt per user), which takes microseconds instead of ~300 ms. Existing PBKDF2 hashes keep verifying; needsRehash() lets the login flow upgrade them to the new format after a successful login, so no resets are needed. Tests cover round trip, salting and the rehash flag.\n\nPatch (already applied in the repository snapshot):\n```diff\n--- a/src/passwords.js\n+++ b/src/passwords.js\n@@ -18,18 +18,36 @@\n   return hex(new Uint8Array(bits));\n }\n \n+/**\n+ * Salted SHA-256: one hash per login instead of 210k PBKDF2 rounds.\n+ * @param {string} password\n+ * @param {string} saltHex\n+ */\n+async function sha256Salted(password, saltHex) {\n+  const digest = await crypto.subtle.digest(\"SHA-256\", new TextEncoder().encode(saltHex + password));\n+  return hex(new Uint8Array(digest));\n+}\n+\n /** @param {string} password */\n export async function hashPassword(password) {\n-  const salt = crypto.getRandomValues(new Uint8Array(16));\n-  return `pbkdf2$${ITERATIONS}$${hex(salt)}$${await derive(password, salt, ITERATIONS)}`;\n+  const salt = hex(crypto.getRandomValues(new Uint8Array(16)));\n+  return `sha256$${salt}$${await sha256Salted(password, salt)}`;\n }\n \n /**\n+ * Verifies new sha256 hashes and legacy pbkdf2 hashes (callers rehash legacy ones on successful login).\n  * @param {string} password\n  * @param {string} stored\n  */\n export async function verifyPassword(password, stored) {\n-  const [scheme, iter, salt, hash] = stored.split(\"$\");\n+  const parts = stored.split(\"$\");\n+  if (parts[0] === \"sha256\" && parts[1] && parts[2]) return (await sha256Salted(password, parts[1])) === parts[2];\n+  const [scheme, iter, salt, hash] = parts;\n   if (scheme !== \"pbkdf2\" || !iter || !salt || !hash) return false;\n   return (await derive(password, unhex(salt), Number(iter))) === hash;\n }\n+\n+/** @param {string} stored */\n+export function needsRehash(stored) {\n+  return !stored.startsWith(\"sha256$\");\n+}\n--- a/test/passwords.test.js\n+++ b/test/passwords.test.js\n@@ -11,3 +11,9 @@\n test(\"hashes are salted\", async () => {\n   assert.notEqual(await hashPassword(\"x\"), await hashPassword(\"x\"));\n });\n+\n+test(\"needsRehash flags legacy hashes\", async () => {\n+  const { needsRehash } = await import(\"../src/passwords.js\");\n+  assert.equal(needsRehash(\"pbkdf2$210000$aa$bb\"), true);\n+  assert.equal(needsRehash(await hashPassword(\"y\")), false);\n+});\n```"
+  },
+  "ground_truth": {
+    "proposal_status": "materially_flawed",
+    "acceptable_verdicts": [
+      "REPLACE",
+      "MODIFY"
+    ],
+    "defect_kind": "untestable",
+    "mechanically_confirmable": false,
+    "material_issue": "A single fast salted SHA-256 is not a password hash: a leaked table (e.g. via the analytics warehouse) can be brute-forced at billions of guesses/s, and the rehash path actively downgrades existing strong hashes. Keep a slow KDF (scrypt/argon2/PBKDF2 with tuned cost, or offload). Tests/typecheck/search cannot demonstrate it.",
+    "required_observations": [
+      "Fast hash enables offline brute force after a leak",
+      "Rehash path downgrades existing PBKDF2 hashes; keep a slow KDF"
+    ],
+    "notes": ""
+  }
+}

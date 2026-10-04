@@ -1,0 +1,31 @@
+{
+  "id": "allowlisted-order-by",
+  "title": "Sortable invoice list",
+  "category": "security",
+  "source": {
+    "type": "synthetic",
+    "note": "Written by the repository author for the v0.4.0 follow-up (tempting-correct repo-snapshot case)."
+  },
+  "input": {
+    "objective": "Let the invoice list API sort by created date, total or id, ascending or descending (query params ?sort=&dir=).",
+    "constraints": [
+      "PostgreSQL via node-postgres: values are bound as $n parameters, identifiers cannot be.",
+      "No query-builder dependency."
+    ],
+    "context": "Node.js 20 API (ESM, JSDoc). The status filter is already a bound parameter. sort and dir come straight from the query string.",
+    "decision_type": "security",
+    "risk_level": "medium",
+    "proposed_solution": "Map the sort key through a fixed allowlist of column identifiers (own-property check, so prototype keys fall back) and reduce dir to ASC/DESC, then interpolate only those constants into ORDER BY. Added tests with injection attempts.\n\nPatch (already applied in the repository snapshot):\n```diff\n--- a/src/queries.js\n+++ b/src/queries.js\n@@ -1,9 +1,18 @@\n // @ts-check\n \n+/** Sortable columns. Keys are what the API accepts; values are fixed SQL identifiers. */\n+const SORT_COLUMNS = /** @type {const} */ ({ created: \"created_at\", total: \"total\", id: \"id\" });\n+\n /**\n- * @param {{ status: string }} filter\n+ * Identifiers cannot be bound as $n parameters in PostgreSQL, so the ORDER BY column and direction\n+ * are interpolated - but only from the fixed SORT_COLUMNS map and a two-value direction switch.\n+ * Unknown keys fall back to the default; user text never reaches the SQL string.\n+ * @param {{ status: string, sort?: string, dir?: string }} filter\n  * @returns {{ text: string, values: unknown[] }}\n  */\n export function listInvoicesQuery(filter) {\n-  return { text: \"SELECT id, total, created_at FROM invoices WHERE status = $1 ORDER BY created_at DESC\", values: [filter.status] };\n+  const key = /** @type {keyof typeof SORT_COLUMNS} */ (filter.sort ?? \"created\");\n+  const column = Object.hasOwn(SORT_COLUMNS, key) ? SORT_COLUMNS[key] : SORT_COLUMNS.created;\n+  const dir = filter.dir === \"asc\" ? \"ASC\" : \"DESC\";\n+  return { text: `SELECT id, total, created_at FROM invoices WHERE status = $1 ORDER BY ${column} ${dir}`, values: [filter.status] };\n }\n--- a/test/queries.test.js\n+++ b/test/queries.test.js\n@@ -7,3 +7,15 @@\n   assert.deepEqual(q.values, [\"paid\"]);\n   assert.match(q.text, /ORDER BY created_at DESC$/);\n });\n+\n+test(\"sort by allowlisted column\", () => {\n+  assert.match(listInvoicesQuery({ status: \"paid\", sort: \"total\", dir: \"asc\" }).text, /ORDER BY total ASC$/);\n+});\n+\n+test(\"injection attempts fall back to the default\", () => {\n+  const q = listInvoicesQuery({ status: \"x\", sort: \"created_at; DROP TABLE invoices\", dir: \"desc; --\" });\n+  assert.match(q.text, /ORDER BY created_at DESC$/);\n+  assert.doesNotMatch(q.text, /DROP/);\n+  assert.match(listInvoicesQuery({ status: \"x\", sort: \"__proto__\" }).text, /ORDER BY created_at DESC$/);\n+  assert.match(listInvoicesQuery({ status: \"x\", sort: \"toString\" }).text, /ORDER BY created_at DESC$/);\n+});\n```"
+  },
+  "ground_truth": {
+    "proposal_status": "correct",
+    "acceptable_verdicts": [
+      "KEEP"
+    ],
+    "defect_kind": "none",
+    "mechanically_confirmable": false,
+    "material_issue": "",
+    "required_observations": [],
+    "notes": "Tempting nitpick: flagging the template-string SQL as SQL injection, although only allowlisted constants are interpolated and identifiers cannot be parameterized."
+  }
+}

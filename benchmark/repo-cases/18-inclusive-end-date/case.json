@@ -1,0 +1,30 @@
+{
+  "id": "inclusive-end-date",
+  "title": "Include the whole last day in date-range filters",
+  "category": "bugfix",
+  "source": {
+    "type": "synthetic",
+    "note": "Written by the repository author for v0.4.0 (repo-snapshot case)."
+  },
+  "input": {
+    "objective": "Monthly activity reports miss everything that happened on the last day of the month after 00:00. Fix the range filter.",
+    "constraints": [
+      "All timestamps are stored and compared in UTC; report days are UTC days by product decision."
+    ],
+    "context": "Activity reporting (Node.js 20, ESM JavaScript with JSDoc types). The API takes from/to as YYYY-MM-DD and documents both as inclusive.",
+    "decision_type": "debugging",
+    "risk_level": "low",
+    "proposed_solution": "The end bound was midnight at the START of `to`, so the last day was cut off. Use a half-open interval: keep `start` inclusive and compare `t < start-of-(to + 1 day)` in UTC. Added a test with 23:59:59.999 on the last day and 00:00 of the next day.\n\nPatch (already applied in the repository snapshot):\n```diff\n--- a/src/range.js\n+++ b/src/range.js\n@@ -1,16 +1,19 @@\n // @ts-check\n+\n+const DAY_MS = 24 * 60 * 60 * 1000;\n \n /**\n  * Events between `from` and `to` (both YYYY-MM-DD, UTC), inclusive of both days.\n+ * The end bound is exclusive at the start of the day after `to`.\n  * @param {Array<{ id: string, at: string }>} events  ISO-8601 UTC timestamps\n  * @param {string} from\n  * @param {string} to\n  */\n export function eventsInRange(events, from, to) {\n   const start = Date.parse(`${from}T00:00:00Z`);\n-  const end = Date.parse(`${to}T00:00:00Z`);\n+  const endExclusive = Date.parse(`${to}T00:00:00Z`) + DAY_MS;\n   return events.filter((e) => {\n     const t = Date.parse(e.at);\n-    return t >= start && t <= end;\n+    return t >= start && t < endExclusive;\n   });\n }\n--- a/test/range.test.js\n+++ b/test/range.test.js\n@@ -6,3 +6,11 @@\n   const ev = [{ id: \"a\", at: \"2026-03-01T00:00:00Z\" }, { id: \"b\", at: \"2026-02-28T23:59:59Z\" }];\n   assert.deepEqual(eventsInRange(ev, \"2026-03-01\", \"2026-03-31\").map((e) => e.id), [\"a\"]);\n });\n+\n+test(\"includes the whole last day and nothing after it\", () => {\n+  const ev = [\n+    { id: \"last\", at: \"2026-03-31T23:59:59.999Z\" },\n+    { id: \"next\", at: \"2026-04-01T00:00:00Z\" },\n+  ];\n+  assert.deepEqual(eventsInRange(ev, \"2026-03-01\", \"2026-03-31\").map((e) => e.id), [\"last\"]);\n+});\n```"
+  },
+  "ground_truth": {
+    "proposal_status": "correct",
+    "acceptable_verdicts": [
+      "KEEP"
+    ],
+    "defect_kind": "none",
+    "mechanically_confirmable": false,
+    "material_issue": "",
+    "required_observations": [],
+    "notes": "Tempting nitpick: timezone/DST concerns (excluded: everything is UTC by decision) or leap seconds."
+  }
+}

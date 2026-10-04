@@ -1,0 +1,31 @@
+{
+  "id": "bounded-lru-memoize",
+  "title": "Bound the memoize cache with LRU eviction",
+  "category": "performance",
+  "source": {
+    "type": "synthetic",
+    "note": "Written by the repository author for v0.4.0 (repo-snapshot case)."
+  },
+  "input": {
+    "objective": "Heap snapshots of a long-running worker show memoize()'s Map growing without bound (keys come from user input). Bound the cache.",
+    "constraints": [
+      "No new runtime dependencies.",
+      "Callers that pass no size must keep working."
+    ],
+    "context": "Utility module (Node.js 20, ESM JavaScript with JSDoc types). memoize() is used for a handful of pure, deterministic lookups (e.g. country display names); single-threaded Node process.",
+    "decision_type": "performance",
+    "risk_level": "low",
+    "proposed_solution": "Turn the cache into an LRU with a default capacity of 500: on a hit, delete and re-insert the key (Map keeps insertion order, so the first key is always the least recently used); after inserting a new key, evict the first key if the size exceeds the cap. Added an eviction-order test.\n\nPatch (already applied in the repository snapshot):\n```diff\n--- a/src/memoize.js\n+++ b/src/memoize.js\n@@ -1,18 +1,29 @@\n // @ts-check\n \n /**\n- * Memoize a single-argument function.\n+ * Memoize a single-argument function with a bounded LRU cache.\n+ * Map preserves insertion order, so the first key is the least recently used one.\n  * @template K, V\n  * @param {(key: K) => V} fn\n+ * @param {number} [maxEntries]\n  */\n-export function memoize(fn) {\n+export function memoize(fn, maxEntries = 500) {\n   /** @type {Map<K, V>} */\n   const cache = new Map();\n   /** @param {K} key */\n   return (key) => {\n-    if (cache.has(key)) return /** @type {V} */ (cache.get(key));\n+    if (cache.has(key)) {\n+      const hit = /** @type {V} */ (cache.get(key));\n+      cache.delete(key);\n+      cache.set(key, hit);\n+      return hit;\n+    }\n     const value = fn(key);\n     cache.set(key, value);\n+    if (cache.size > maxEntries) {\n+      const oldest = cache.keys().next();\n+      if (!oldest.done) cache.delete(oldest.value);\n+    }\n     return value;\n   };\n }\n--- a/test/memoize.test.js\n+++ b/test/memoize.test.js\n@@ -9,3 +9,15 @@\n   assert.equal(f(2), 4);\n   assert.equal(calls, 1);\n });\n+\n+test(\"evicts the least recently used entry\", () => {\n+  let calls = 0;\n+  const f = memoize((x) => { calls++; return x; }, 2);\n+  f(1); f(2);\n+  f(1);          // 1 becomes most recent\n+  f(3);          // evicts 2\n+  f(1);          // still cached\n+  assert.equal(calls, 3);\n+  f(2);          // recomputed\n+  assert.equal(calls, 4);\n+});\n```"
+  },
+  "ground_truth": {
+    "proposal_status": "correct",
+    "acceptable_verdicts": [
+      "KEEP"
+    ],
+    "defect_kind": "none",
+    "mechanically_confirmable": false,
+    "material_issue": "",
+    "required_observations": [],
+    "notes": "Tempting nitpick: recommending the lru-cache package, TTLs, or worrying about thread safety in single-threaded Node."
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "id": "drop-legacy-id-column",
+  "title": "Drop the users.legacy_id column",
+  "category": "database",
+  "source": {
+    "type": "synthetic",
+    "note": "Written by the repository author for v0.4.0 (repo-snapshot case)."
+  },
+  "input": {
+    "objective": "Clean up the users table after the v1 API removal: the legacy_id column is a leftover.",
+    "constraints": [
+      "Migrations run automatically on deploy and DROP COLUMN is irreversible (backups are restored only for disasters)."
+    ],
+    "context": "Users service (Node.js 20, ESM JavaScript, SQLite-compatible SQL). The v1 API that exposed legacyId was removed in March.",
+    "decision_type": "database",
+    "risk_level": "high",
+    "proposed_solution": "Add migration 004 that drops users.legacy_id, and stop selecting and mapping it in src/users.js. The column was only used by the v1 API, which was removed in March; nothing reads it anymore.\n\nPatch (already applied in the repository snapshot):\n```diff\n--- /dev/null\n+++ b/migrations/004_drop_legacy_id.sql\n@@ -0,0 +1,2 @@\n+-- 004: drop users.legacy_id (v1 API was removed)\n+ALTER TABLE users DROP COLUMN legacy_id;\n--- a/src/users.js\n+++ b/src/users.js\n@@ -2,10 +2,10 @@\n \n /**\n  * Map a database row to the API user object.\n- * @param {{ id: number, email: string, name: string, legacy_id: string | null }} row\n+ * @param {{ id: number, email: string, name: string }} row\n  */\n export function toApiUser(row) {\n-  return { id: row.id, email: row.email, name: row.name, legacyId: row.legacy_id };\n+  return { id: row.id, email: row.email, name: row.name };\n }\n \n-export const SELECT_USER = \"SELECT id, email, name, legacy_id FROM users WHERE id = ?\";\n+export const SELECT_USER = \"SELECT id, email, name FROM users WHERE id = ?\";\n--- a/test/users.test.js\n+++ b/test/users.test.js\n@@ -3,5 +3,5 @@\n import { toApiUser } from \"../src/users.js\";\n \n test(\"maps row\", () => {\n-  assert.deepEqual(toApiUser({ id: 1, email: \"a@x\", name: \"A\", legacy_id: null }), { id: 1, email: \"a@x\", name: \"A\", legacyId: null });\n+  assert.deepEqual(toApiUser({ id: 1, email: \"a@x\", name: \"A\" }), { id: 1, email: \"a@x\", name: \"A\" });\n });\n```"
+  },
+  "ground_truth": {
+    "proposal_status": "materially_flawed",
+    "acceptable_verdicts": [
+      "MODIFY",
+      "REPLACE"
+    ],
+    "defect_kind": "search",
+    "mechanically_confirmable": true,
+    "material_issue": "src/reports/partner-export.js still selects legacy_id for the nightly partner reconciliation export; after the irreversible DROP COLUMN that query fails and the partner loses the id mapping. Found by searching for legacy_id; tests and typecheck pass (SQL strings are not checked).",
+    "required_observations": [
+      "partner-export still reads legacy_id",
+      "Irreversible drop breaks the partner export / data loss"
+    ],
+    "notes": ""
+  }
+}

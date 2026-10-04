@@ -1,0 +1,222 @@
+{
+  "schema": "blindreview-repo-benchmark/v1",
+  "label": "followup-pilot-glm",
+  "created_at": "2026-10-04T13:42:11.726Z",
+  "git": {
+    "sha": "2836fea74f4235c43ecc70e43e93383759cefd7a",
+    "dirty": false
+  },
+  "model": "z-ai/glm-5.3-flash",
+  "base_url_host": "openrouter.ai",
+  "config": {
+    "evidence_limits": {
+      "maxToolCalls": 8,
+      "maxReviewTokens": 80000,
+      "maxTokensPerCall": 8000,
+      "timeoutMs": 300000
+    },
+    "text_max_review_tokens": 24000,
+    "text_max_tokens_per_call": 6000,
+    "reasoning_effort": null,
+    "temperature": null,
+    "retries": 2,
+    "concurrency": 2
+  },
+  "pricing": {
+    "prompt": 1.5e-7,
+    "completion": 5e-7
+  },
+  "case_set_hash": "7129cfd34e8f24c6-subset1",
+  "case_count": 1,
+  "prompt_hashes": {
+    "proposal_first": "86399d1d74424d49",
+    "proposal_first_2pass": "babc3ad0bb43463c",
+    "blind_first": "d62bdbaf1e4a7d18",
+    "repair": "1cd5c9f17886635b",
+    "independent_only": "16d4fca86343b220",
+    "decision_judge": "60b581a50444a02e",
+    "evidence_gate": "27b99c0914be4874"
+  },
+  "modes": [
+    "evidence_gate",
+    "decision_judge"
+  ],
+  "runs": 1,
+  "seed": 42,
+  "records": [
+    {
+      "case_id": "serialized-debit",
+      "run": 1,
+      "mode": "decision_judge",
+      "model": "z-ai/glm-5.3-flash",
+      "attempts": 1,
+      "retries": [],
+      "ok": true,
+      "usage_all_attempts": {
+        "prompt_tokens": 1107,
+        "completion_tokens": 2062,
+        "total_tokens": 3169
+      },
+      "cost_usd_all_attempts": 0.000670348,
+      "cost_source": "reported",
+      "latency_ms": 37668,
+      "verdict": "KEEP",
+      "review": {
+        "verdict": "KEEP",
+        "recommendation": "The implementation is correct: placing the read-check-write inside the same serial queue as credit(), combined with the single-writer guarantee, makes the check atomic with respect to all balance mutations, and no CAS is needed. The new test directly exercises the failure mode (10 concurrent debits, balance 5, exactly 5 succeed, final balance 0). Optionally add a guard for cents <= 0 and a test for debit on a missing account to match whatever default store.get returns.",
+        "critical_assumptions": [
+          "store.get(id) returns a number (e.g., 0) for missing keys, never undefined; otherwise debit (and existing credit) would write NaN via balance < cents / balance - cents on undefined",
+          "serialQueue() fully awaits each task, including inner awaits like store.set, before starting the next task (implied by the existing 50-concurrent-credit test)",
+          "This process truly is the only writer of balances per the README, so no external interleaving can occur",
+          "queue.push resolves with the task's return value so debit's boolean reaches the caller",
+          "Callers pass sensible non-negative cents; neither credit nor debit validates input"
+        ],
+        "material_risks": [
+          "If store.get returns undefined for a never-seen id, debit('x', 1) evaluates undefined < 1 as false and writes NaN to the store, corrupting the balance (same latent bug exists in credit, so it's a store-default question, not a debit regression)",
+          "debit(id, negativeCents) increases the balance, effectively a credit that bypasses the overdraw check; harmless for the stated objective but a semantic footgun"
+        ],
+        "falsification_probe": {
+          "description": "Run a quick script against the patched code: const s = createStore(); const w = createWallet(s); console.log(await w.debit('new', 1), await s.get('new')); and also console.log(await s.get('missing')) to inspect the default value for absent keys.",
+          "expected_signal": "If debit returns false and the missing-key get yields 0 (or any finite number), the proposal is confirmed. If get('missing') is undefined or the balance becomes NaN, the assumption breaks and a default-balance guard is needed."
+        },
+        "confidence": 0.9,
+        "meta": {
+          "review_id": "2db17942-6ade-4f1f-b4af-9ecad226328b",
+          "review_mode": "decision_judge",
+          "model": "z-ai/glm-5.3-flash",
+          "phases": 1,
+          "usage": {
+            "prompt_tokens": 1107,
+            "completion_tokens": 2062,
+            "total_tokens": 3169
+          },
+          "latency_ms": 37668
+        }
+      }
+    },
+    {
+      "case_id": "serialized-debit",
+      "run": 1,
+      "mode": "evidence_gate",
+      "model": "z-ai/glm-5.3-flash",
+      "attempts": 1,
+      "retries": [],
+      "ok": true,
+      "usage_all_attempts": {
+        "prompt_tokens": 7864,
+        "completion_tokens": 1063,
+        "total_tokens": 8927
+      },
+      "cost_usd_all_attempts": 0.0008083128,
+      "cost_source": "reported",
+      "latency_ms": 29654,
+      "verdict": "KEEP",
+      "model_verdict": "KEEP",
+      "evidence": {
+        "verdict": "KEEP",
+        "answer": {
+          "decision": "KEEP",
+          "summary": "debit() correctly serializes its read-check-write through the same concurrency-1 queue as credit(), so overdraw is impossible; the store is untouched and the new concurrency test plus typecheck pass.",
+          "claim": null
+        },
+        "gate": {
+          "model_verdict": "KEEP",
+          "final_verdict": "KEEP",
+          "model_result": null,
+          "final_result": null,
+          "status": "no_claim",
+          "reason": "no material defect claimed",
+          "matched": [],
+          "verdict_forced": false
+        },
+        "tool_log": [
+          {
+            "id": "T1",
+            "tool": "read_file",
+            "args": {
+              "path": "src/queue.js"
+            },
+            "ok": true,
+            "artifacts": [],
+            "output_chars": 538,
+            "ms": 2,
+            "output_preview": "src/queue.js (lines 1-18 of 18)\n   1| // @ts-check\n   2| \n   3| /**\n   4|  * Runs jobs strictly one at a time, in submission order (concurrency 1).\n   5|  * @returns {{ push: <T>(job: () => Promise<T>) => Promise<T> }}\n   6|  */\n   7| export function serialQueue() {\n   8|   /** @type {Promise<unknown>} */\n   9|   let tail = Promise.resolve();\n  10|   return {\n  11|     push(job) {\n  12|       const run = tail.then(job, job);\n  13|       tail = run.catch(() => undefined);\n  14|       return run;\n  15|     },\n  16|   };\n  17| }\n  18| "
+          },
+          {
+            "id": "T2",
+            "tool": "read_file",
+            "args": {
+              "path": "src/store.js"
+            },
+            "ok": true,
+            "artifacts": [],
+            "output_chars": 525,
+            "ms": 1,
+            "output_preview": "src/store.js (lines 1-14 of 14)\n   1| // @ts-check\n   2| \n   3| /** In-memory stand-in for the balances table. */\n   4| export function createStore() {\n   5|   /** @type {Map<string, number>} */\n   6|   const balances = new Map();\n   7|   return {\n   8|     /** @param {string} id */\n   9|     async get(id) { await Promise.resolve(); return balances.get(id) ?? 0; },\n  10|     /** @param {string} id @param {number} v */\n  11|     async set(id, v) { await Promise.resolve(); balances.set(id, v); },\n  12|   };\n  13| }\n  14| "
+          },
+          {
+            "id": "T3",
+            "tool": "read_file",
+            "args": {
+              "path": "src/wallet.js"
+            },
+            "ok": true,
+            "artifacts": [],
+            "output_chars": 1209,
+            "ms": 1,
+            "output_preview": "src/wallet.js (lines 1-32 of 32)\n   1| // @ts-check\n   2| import { serialQueue } from \"./queue.js\";\n   3| \n   4| /**\n   5|  * All balance mutations go through one serial queue, so the read-modify-write below never\n   6|  * interleaves with another mutation (this process is the only writer: see README \"Ownership\").\n   7|  * @param {ReturnType<typeof import(\"./store.js\").createStore>} store\n   8|  */\n   9| export function createWallet(store) {\n  10|   const queue = serialQueue();\n  11|   return {\n  12|     /** @param {string} id @param {number} cents */\n  13|     credit(id, cents) {\n  14|       "
+          },
+          {
+            "id": "T4",
+            "tool": "read_file",
+            "args": {
+              "path": "test/wallet.test.js"
+            },
+            "ok": true,
+            "artifacts": [],
+            "output_chars": 904,
+            "ms": 0,
+            "output_preview": "test/wallet.test.js (lines 1-21 of 21)\n   1| import { test } from \"node:test\";\n   2| import assert from \"node:assert/strict\";\n   3| import { createStore } from \"../src/store.js\";\n   4| import { createWallet } from \"../src/wallet.js\";\n   5| \n   6| test(\"concurrent credits are not lost\", async () => {\n   7|   const store = createStore();\n   8|   const w = createWallet(store);\n   9|   await Promise.all(Array.from({ length: 50 }, () => w.credit(\"a\", 1)));\n  10|   assert.equal(await store.get(\"a\"), 50);\n  11| });\n  12| \n  13| test(\"concurrent debits never overdraw\", async () => {\n  14|   const stor"
+          },
+          {
+            "id": "T5",
+            "tool": "run_test",
+            "args": {
+              "test_file": "test/wallet.test.js"
+            },
+            "ok": true,
+            "artifacts": [],
+            "output_chars": 52,
+            "ms": 299,
+            "output_preview": "run_test test/wallet.test.js: exit 0, pass 2, fail 0"
+          },
+          {
+            "id": "T6",
+            "tool": "typecheck",
+            "args": {},
+            "ok": true,
+            "artifacts": [],
+            "output_chars": 20,
+            "ms": 664,
+            "output_preview": "typecheck: no errors"
+          }
+        ],
+        "tool_calls_rejected": 0,
+        "meta": {
+          "review_mode": "evidence_gate",
+          "model": "z-ai/glm-5.3-flash",
+          "usage": {
+            "prompt_tokens": 7864,
+            "completion_tokens": 1063,
+            "total_tokens": 8927
+          },
+          "cost_usd": 0.0008083128,
+          "turns": 3,
+          "latency_ms": 29654,
+          "forced_final": false,
+          "repaired": false
+        }
+      }
+    }
+  ]
+}

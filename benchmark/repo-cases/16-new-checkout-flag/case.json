@@ -1,0 +1,31 @@
+{
+  "id": "new-checkout-flag",
+  "title": "Put the new checkout page behind a default-off flag",
+  "category": "feature-flag",
+  "source": {
+    "type": "synthetic",
+    "note": "Written by the repository author for v0.4.0 (repo-snapshot case)."
+  },
+  "input": {
+    "objective": "Ship the new checkout template dark so it can be enabled per environment without a deploy.",
+    "constraints": [
+      "Production behaviour must not change until the flag is switched on.",
+      "Flags come from environment variables, as for the existing searchV2 flag."
+    ],
+    "context": "Web shop (Node.js 20, ESM JavaScript with JSDoc types checked by tsc). Feature flags are read once at startup by loadFlags(); the checkout-v2 template is already deployed.",
+    "decision_type": "implementation",
+    "risk_level": "low",
+    "proposed_solution": "Add a `newCheckout` flag read from FLAG_NEW_CHECKOUT with the existing parseBool helper, defaulting to false. checkoutPage() renders checkout-v2 only when the flag is on. Tests cover the default, enabling it, and template selection.\n\nPatch (already applied in the repository snapshot):\n```diff\n--- a/src/checkout.js\n+++ b/src/checkout.js\n@@ -1,9 +1,9 @@\n // @ts-check\n \n /**\n- * @param {import(\"./flags.js\").Flags} _flags\n+ * @param {import(\"./flags.js\").Flags} flags\n  * @param {{ items: number }} cart\n  */\n-export function checkoutPage(_flags, cart) {\n-  return { template: \"checkout-v1\", items: cart.items };\n+export function checkoutPage(flags, cart) {\n+  return { template: flags.newCheckout ? \"checkout-v2\" : \"checkout-v1\", items: cart.items };\n }\n--- a/src/flags.js\n+++ b/src/flags.js\n@@ -1,13 +1,16 @@\n // @ts-check\n \n-/** @typedef {{ searchV2: boolean }} Flags */\n+/** @typedef {{ searchV2: boolean, newCheckout: boolean }} Flags */\n \n /**\n  * @param {Record<string, string | undefined>} env\n  * @returns {Flags}\n  */\n export function loadFlags(env) {\n-  return { searchV2: parseBool(env.FLAG_SEARCH_V2, false) };\n+  return {\n+    searchV2: parseBool(env.FLAG_SEARCH_V2, false),\n+    newCheckout: parseBool(env.FLAG_NEW_CHECKOUT, false),\n+  };\n }\n \n /**\n--- /dev/null\n+++ b/test/checkout.test.js\n@@ -0,0 +1,8 @@\n+import { test } from \"node:test\";\n+import assert from \"node:assert/strict\";\n+import { checkoutPage } from \"../src/checkout.js\";\n+\n+test(\"v1 by default, v2 behind the flag\", () => {\n+  assert.equal(checkoutPage({ searchV2: false, newCheckout: false }, { items: 1 }).template, \"checkout-v1\");\n+  assert.equal(checkoutPage({ searchV2: false, newCheckout: true }, { items: 1 }).template, \"checkout-v2\");\n+});\n--- a/test/flags.test.js\n+++ b/test/flags.test.js\n@@ -2,9 +2,11 @@\n import assert from \"node:assert/strict\";\n import { loadFlags, parseBool } from \"../src/flags.js\";\n \n-test(\"flags default to off\", () => assert.deepEqual(loadFlags({}), { searchV2: false }));\n+test(\"flags default to off\", () => assert.deepEqual(loadFlags({}), { searchV2: false, newCheckout: false }));\n test(\"parseBool\", () => {\n   assert.equal(parseBool(\"TRUE\", false), true);\n   assert.equal(parseBool(\"0\", true), false);\n   assert.equal(parseBool(undefined, true), true);\n });\n+\n+test(\"new checkout flag can be enabled\", () => assert.equal(loadFlags({ FLAG_NEW_CHECKOUT: \"on\" }).newCheckout, true));\n```"
+  },
+  "ground_truth": {
+    "proposal_status": "correct",
+    "acceptable_verdicts": [
+      "KEEP"
+    ],
+    "defect_kind": "none",
+    "mechanically_confirmable": false,
+    "material_issue": "",
+    "required_observations": [],
+    "notes": "Tempting nitpick: asking for percentage rollouts / a flag service, or flag-removal tickets."
+  }
+}

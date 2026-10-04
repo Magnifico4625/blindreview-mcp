@@ -3,7 +3,7 @@ import { promptHashes } from "../src/reviewer/prompt-fingerprint.js";
 
 /**
  * Frozen prompt hashes. proposal_first, proposal_first_2pass, blind_first and repair are frozen at
- * v0.2.0; independent_only and decision_judge at v0.3.0. If this test fails you changed a prompt:
+ * v0.2.0; independent_only and decision_judge at v0.3.0; evidence_gate (prompt + tool definitions) at v0.4.0. If this test fails you changed a prompt:
  * revert it, or add a NEW named mode instead (benchmark comparability depends on it).
  */
 const FROZEN: Record<string, string> = {
@@ -13,6 +13,8 @@ const FROZEN: Record<string, string> = {
   repair: "1cd5c9f17886635b",
   independent_only: "16d4fca86343b220",
   decision_judge: "60b581a50444a02e",
+  // v0.4.0
+  evidence_gate: "27b99c0914be4874",
 };
 
 describe("prompt freeze", () => {
