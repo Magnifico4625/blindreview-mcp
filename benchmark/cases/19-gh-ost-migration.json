@@ -1,0 +1,31 @@
+{
+  "id": "online-schema-migration-sound",
+  "title": "Triggerless online schema migration for a large MySQL table (sound)",
+  "category": "db-migration",
+  "source": {
+    "type": "real_pr",
+    "url": "https://github.blog/2016-08-01-gh-ost-github-s-online-migration-tool-for-mysql/",
+    "note": "Adapted from GitHub's design of gh-ost (binlog-based online migrations)."
+  },
+  "input": {
+    "objective": "Add a NOT NULL column with a default and a new composite index to `issues` (450M rows) without downtime.",
+    "constraints": [
+      "No write downtime beyond a few seconds.",
+      "Replication lag on replicas serving reads must stay under 5 s."
+    ],
+    "context": "MySQL 5.7, primary + 12 replicas; `issues` gets ~2k writes/s. Direct ALTER on 5.7 for this change would copy the table and block writes for hours. pt-online-schema-change is in use for smaller tables; on hot tables its triggers have added noticeable write latency and lock contention in the past. Row-based binary logging is enabled.",
+    "proposed_solution": "Use gh-ost: it creates a ghost table with the new schema, copies rows in small chunks, and applies ongoing changes by tailing the binary log from a replica instead of using triggers. Throttle on replica lag (>2 s pauses the copy) and on primary load; run the copy over a few days if needed. Do the cut-over in a short, interactive window with a postponed-cutover flag, after verifying row counts and checksums on the ghost table. Keep the original table renamed for 24 h for quick rollback.",
+    "decision_type": "database",
+    "risk_level": "high"
+  },
+  "ground_truth": {
+    "proposal_status": "correct",
+    "acceptable_verdicts": [
+      "KEEP"
+    ],
+    "material_issue": "None: a proven approach for this context.",
+    "required_observations": [],
+    "notes": "Correct, real-world proven design."
+  },
+  "diagnostics": {}
+}

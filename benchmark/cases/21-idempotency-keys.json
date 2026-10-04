@@ -1,0 +1,31 @@
+{
+  "id": "idempotency-keys-sound",
+  "title": "Client-supplied idempotency keys for payment creation (sound)",
+  "category": "retries-idempotency",
+  "source": {
+    "type": "real_pr",
+    "url": "https://stripe.com/blog/idempotency",
+    "note": "Adapted from Stripe's idempotency-key design."
+  },
+  "input": {
+    "objective": "Make retries of `POST /payments` safe so that network timeouts never cause double charges.",
+    "constraints": [
+      "Clients retry automatically on timeouts and 5xx.",
+      "p99 of payment creation must stay below 1 s."
+    ],
+    "context": "Payments service (PostgreSQL) calls an external card processor. Mobile clients on bad networks often time out and retry; support sees ~40 double charges per week. The processor supports its own idempotency token per request.",
+    "proposed_solution": "Require an `Idempotency-Key` header on POST /payments. Store keys in a table with a unique constraint on (account_id, key), together with a request fingerprint, status and the final response. On a retry with the same key: return the stored response if finished, 409 if still in progress, and 422 if the fingerprint differs. The processor call carries a token derived from the key, so a retry after a crash mid-request cannot charge twice. Keys expire after 24 h. Clients generate a UUID per logical payment and reuse it across retries with exponential backoff and jitter.",
+    "decision_type": "api",
+    "risk_level": "high"
+  },
+  "ground_truth": {
+    "proposal_status": "correct",
+    "acceptable_verdicts": [
+      "KEEP"
+    ],
+    "material_issue": "None: a proven approach for this context.",
+    "required_observations": [],
+    "notes": "Correct, real-world proven design."
+  },
+  "diagnostics": {}
+}

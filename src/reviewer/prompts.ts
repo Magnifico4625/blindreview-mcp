@@ -156,3 +156,77 @@ export function buildRepairMessage(problem: string): ChatMessage {
 Return ONLY the corrected JSON object with the required fields. No prose, no markdown fences.`,
   };
 }
+
+// ---------------------------------------------------------------------------------------------
+// Prompts added in v0.3.0 (benchmark-only modes). The prompts above are frozen at v0.2.0 and
+// pinned by tests/prompt-freeze.test.ts; change them only by adding a new named mode.
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * independent_only, step 2: a FRESH session (no Phase-1 transcript, no problem statement).
+ * The comparer only sees the independent position and the proposal.
+ */
+export function buildIndependentComparerMessages(positionJson: string, proposedSolution: string): ChatMessage[] {
+  return [
+    {
+      role: "system",
+      content: `${SHARED_RULES}
+You compare a proposed solution against an independent position that another analyst wrote about the same problem WITHOUT seeing the proposal. You do not see the original problem statement; treat the position's assumptions and failure modes as the requirements.`,
+    },
+    {
+      role: "user",
+      content: `## Independent position (written without seeing the proposal)
+<independent_position>
+${positionJson}
+</independent_position>
+
+## Proposed solution
+<proposed_solution>
+${proposedSolution}
+</proposed_solution>
+
+## Your task
+Decide whether the proposal is acceptable given the failure modes and assumptions in the independent position.
+- A proposal that differs from the preferred solution can still be correct. KEEP is a valid verdict.
+- Recommend changes only for concrete failure modes the proposal does not handle.
+
+${VERDICT_FORMAT}`,
+    },
+  ];
+}
+
+/** decision_judge (experiment): single pass, proposal shown, explicit anti critic-bias instruction. */
+export function buildDecisionJudgeMessages(input: ReviewInput): ChatMessage[] {
+  const blindPart: BlindInput = {
+    objective: input.objective,
+    constraints: input.constraints,
+    context: input.context,
+    decision_type: input.decision_type,
+    risk_level: input.risk_level,
+    ...(input.environment !== undefined ? { environment: input.environment } : {}),
+    ...(input.evidence !== undefined ? { evidence: input.evidence } : {}),
+  };
+  return [
+    {
+      role: "system",
+      content: `${SHARED_RULES}
+Determine whether intervention is actually warranted. Preserving a correct proposal is equally valuable to identifying a flawed one.`,
+    },
+    {
+      role: "user",
+      content: `${renderTask(blindPart)}
+
+## Proposed solution
+<proposed_solution>
+${input.proposed_solution}
+</proposed_solution>
+
+## Your task
+Decide whether intervention is warranted.
+- Do not recommend changes merely because another valid implementation exists.
+- Answer MODIFY or REPLACE only if the proposal has a material correctness, safety, feasibility, compatibility, or maintainability problem; otherwise answer KEEP (minor suggestions may go into the recommendation).
+
+${VERDICT_FORMAT}`,
+    },
+  ];
+}

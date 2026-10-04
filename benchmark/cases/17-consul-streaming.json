@@ -1,0 +1,42 @@
+{
+  "id": "service-discovery-streaming",
+  "title": "Enabling a new streaming mode in service discovery under heavy load",
+  "category": "distributed-systems",
+  "source": {
+    "type": "postmortem",
+    "url": "https://blog.roblox.com/2022/01/roblox-return-to-service-10-28-10-31-2021/",
+    "note": "Adapted from Roblox's 73-hour outage (Oct 28-31, 2021): Consul streaming under high load plus BoltDB freelist behaviour."
+  },
+  "input": {
+    "objective": "Cut CPU and network load on the service-discovery cluster, which is approaching its limits as the fleet grows.",
+    "constraints": [
+      "Every service resolves dependencies through this cluster; it has no fallback.",
+      "The change should be live before the holiday traffic peak in 6 weeks."
+    ],
+    "context": "A single Consul cluster (5 voting servers) backs service discovery, KV config and locks for ~18,000 nodes and thousands of services. Clients use blocking queries (long polling) on health endpoints; profiling shows most server CPU spent serving these. Consul 1.10 offers 'streaming', a push-based alternative to blocking queries that the vendor reports reduces server CPU and network substantially. Consul persists Raft logs in BoltDB.",
+    "proposed_solution": "Enable streaming for all services' health subscriptions in one rollout: upgrade agents and servers to 1.10, set `use_streaming_backend = true` on clients, and verify in staging (200 nodes) that CPU drops. Streaming is the vendor-recommended path for large clusters, and staging already showed a 60% CPU reduction on servers.",
+    "decision_type": "dependency",
+    "risk_level": "critical",
+    "environment": "Consul 1.10, on-prem bare metal, no secondary discovery cluster."
+  },
+  "ground_truth": {
+    "proposal_status": "materially_flawed",
+    "acceptable_verdicts": [
+      "MODIFY",
+      "REPLACE"
+    ],
+    "material_issue": "A brand-new subsystem is enabled fleet-wide on the single critical dependency based on a 200-node staging test that cannot reproduce production write/read concurrency; any contention bug or storage pathology takes down everything, with no fallback. Should roll out gradually per service/datacenter with an instant per-client toggle back to blocking queries, load-test at production scale, and reduce blast radius (separate clusters for discovery vs KV).",
+    "required_observations": [
+      "Staging at 200 nodes does not represent production load/concurrency",
+      "Single critical cluster with no fallback: fleet-wide enablement maximises blast radius",
+      "Gradual per-service rollout with a fast toggle back, scale load testing, isolation of workloads"
+    ],
+    "notes": ""
+  },
+  "diagnostics": {
+    "hidden_flaw_keywords": [
+      "gradual|incremental|canary|subset|per.service",
+      "blast radius|single point|fallback|rollback"
+    ]
+  }
+}

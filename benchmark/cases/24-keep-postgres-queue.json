@@ -1,0 +1,30 @@
+{
+  "id": "keep-postgres-job-queue-sound",
+  "title": "Keeping the Postgres-backed job queue instead of adding Kafka (sound)",
+  "category": "background-jobs",
+  "source": {
+    "type": "synthetic",
+    "note": "Written by the repository author; tests whether the reviewer accepts keeping a simpler existing design."
+  },
+  "input": {
+    "objective": "Decide how background jobs should be dispatched for the next year as the product grows.",
+    "constraints": [
+      "Team of 5 backend engineers, no dedicated platform team.",
+      "Jobs must not be lost and must run at least once."
+    ],
+    "context": "Django app on PostgreSQL 15. Background jobs (emails, PDF generation, webhooks) are stored in a `jobs` table and picked by workers with `SELECT ... FOR UPDATE SKIP LOCKED`, in the same transaction as the business write that creates them. Current peak: 40 jobs/s; growth forecast: 3x in 12 months. Worker pickup latency p99 is 300 ms. A recent architecture proposal suggested introducing Kafka for 'scalability'.",
+    "proposed_solution": "Keep the Postgres queue. It gives transactional enqueue (no lost or phantom jobs), and at 120 jobs/s it is far below what SKIP LOCKED queues handle on this hardware. Add the missing pieces instead: an index on (queue, run_at) for pending rows, a partial index for failed jobs, deletion of completed jobs older than 7 days in batches, and metrics/alerts for queue depth and oldest pending job. Revisit if sustained load exceeds ~1,000 jobs/s or if fan-out to multiple consumers becomes a requirement.",
+    "decision_type": "architecture",
+    "risk_level": "medium"
+  },
+  "ground_truth": {
+    "proposal_status": "correct",
+    "acceptable_verdicts": [
+      "KEEP"
+    ],
+    "material_issue": "None: keeping the existing design is the right call; adding Kafka would add operational load without solving a present problem.",
+    "required_observations": [],
+    "notes": "Right answer is KEEP."
+  },
+  "diagnostics": {}
+}

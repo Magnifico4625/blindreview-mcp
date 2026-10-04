@@ -15,7 +15,8 @@ export const DECISION_TYPES = [
 export const RISK_LEVELS = ["low", "medium", "high", "critical"] as const;
 export const REVIEW_MODES = ["blind_first", "proposal_first"] as const;
 /** Benchmark-only compute-matched control. Not accepted by the MCP tool input. */
-export const BENCHMARK_ONLY_MODES = ["proposal_first_2pass"] as const;
+export const BENCHMARK_ONLY_MODES = ["proposal_first_2pass", "independent_only", "decision_judge"] as const;
+export type BenchmarkOnlyMode = (typeof BENCHMARK_ONLY_MODES)[number];
 export const ALL_MODES = [...REVIEW_MODES, ...BENCHMARK_ONLY_MODES] as const;
 export const VERDICTS = ["KEEP", "MODIFY", "REPLACE", "INSUFFICIENT_EVIDENCE"] as const;
 
@@ -180,6 +181,8 @@ export type ReviewErrorCode = (typeof ERROR_CODES)[number];
 export class ReviewError extends Error {
   readonly code: ReviewErrorCode;
   readonly status: number | undefined;
+  /** Tokens spent before the error (set by the Reviewer), for cost accounting. */
+  usage?: Usage;
   constructor(code: ReviewErrorCode, message: string, options?: { status?: number; cause?: unknown }) {
     super(message, options?.cause !== undefined ? { cause: options.cause } : undefined);
     this.name = "ReviewError";

@@ -1,0 +1,31 @@
+{
+  "id": "date-based-api-versioning-sound",
+  "title": "Date-based API versions with per-account pinning (sound)",
+  "category": "api-compat",
+  "source": {
+    "type": "real_pr",
+    "url": "https://stripe.com/blog/api-versioning",
+    "note": "Adapted from Stripe's description of its API versioning design."
+  },
+  "input": {
+    "objective": "Let the public REST API evolve (rename fields, change response shapes) without breaking existing integrations.",
+    "constraints": [
+      "Integrations must keep working for years without code changes.",
+      "The team ships API changes weekly."
+    ],
+    "context": "Public payments API with ~50k integrations. Today any response-shape change requires a coordinated announcement and many integrations break anyway. The backend code is a single service with a serialization layer that turns internal objects into API responses.",
+    "proposed_solution": "Introduce date-named API versions. Each account is pinned to the version current when it made its first request; clients may override per request with a header to test upgrades. Internally the code always produces the latest shape, and a chain of small 'version change' modules transforms responses (and requests) backwards, one module per breaking change, applied from newest to the account's pinned version. Each module is documented and tested; changelog entries are generated from the modules. Additive changes do not need a new version.",
+    "decision_type": "api",
+    "risk_level": "high"
+  },
+  "ground_truth": {
+    "proposal_status": "correct",
+    "acceptable_verdicts": [
+      "KEEP"
+    ],
+    "material_issue": "None: a proven approach for this context.",
+    "required_observations": [],
+    "notes": "Correct, real-world proven design."
+  },
+  "diagnostics": {}
+}

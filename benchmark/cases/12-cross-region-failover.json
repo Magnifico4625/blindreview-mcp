@@ -1,0 +1,43 @@
+{
+  "id": "cross-region-auto-failover",
+  "title": "Automatic cross-region promotion of the MySQL primary",
+  "category": "distributed-systems",
+  "source": {
+    "type": "postmortem",
+    "url": "https://github.blog/2018-10-30-oct21-post-incident-analysis/",
+    "note": "Adapted from GitHub's October 21, 2018 post-incident analysis (Orchestrator promoted a primary in another region after a 43 s partition)."
+  },
+  "input": {
+    "objective": "Reduce MySQL primary-failure recovery time for the main application from ~30 minutes of manual work to under one minute.",
+    "constraints": [
+      "The product must keep accepting writes during a single-host failure.",
+      "Budget allows the current two-region footprint, nothing more."
+    ],
+    "context": "Main app (Rails monolith) runs in region East; its MySQL clusters have a primary in East plus replicas in East and in region West (~60 ms RTT) for disaster recovery. Asynchronous replication. Application servers only run in East. Failovers are currently done by on-call engineers following a runbook. Orchestrator (topology manager) is already deployed with Raft consensus across East, West and a third public-cloud site, and discovers the full topology.",
+    "proposed_solution": "Enable Orchestrator automated recovery for all clusters: when the primary is unreachable for 30 seconds, Orchestrator (with Raft quorum across the three sites, so a single site cannot decide alone) promotes the most up-to-date replica regardless of region, repoints the other replicas and updates service discovery so applications follow the new primary automatically. Pseudo-GTID is enabled, so no binlog position bookkeeping is needed. We will test it with game days that kill primary hosts in East.",
+    "decision_type": "architecture",
+    "risk_level": "critical",
+    "environment": "MySQL 5.7, Orchestrator 3.x with Raft, Consul for service discovery, semi-synchronous replication not enabled."
+  },
+  "ground_truth": {
+    "proposal_status": "materially_flawed",
+    "acceptable_verdicts": [
+      "MODIFY",
+      "REPLACE"
+    ],
+    "material_issue": "A transient network partition between East and the other sites makes the quorum promote a West replica: writes already accepted in East but not yet replicated are stranded (split data), and the East-only application now writes across ~60 ms RTT to West, degrading every request. Promotion must be region-constrained (or require the app tier to move with it) and must account for unreplicated writes; partition-only events should not trigger cross-region promotion.",
+    "required_observations": [
+      "A network partition (not a host failure) can trigger promotion in the other region",
+      "Writes accepted in East but not replicated are lost/diverged after promotion (async replication)",
+      "Applications stay in East and would write cross-region with high latency",
+      "Restrict automatic promotion to the same region / require explicit decision for cross-region"
+    ],
+    "notes": ""
+  },
+  "diagnostics": {
+    "hidden_flaw_keywords": [
+      "partition",
+      "cross.region|other region|west"
+    ]
+  }
+}

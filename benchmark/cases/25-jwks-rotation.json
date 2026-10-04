@@ -1,0 +1,30 @@
+{
+  "id": "signing-key-rotation-sound",
+  "title": "Rotating JWT signing keys with overlapping JWKS publication (sound)",
+  "category": "security",
+  "source": {
+    "type": "synthetic",
+    "note": "Written by the repository author."
+  },
+  "input": {
+    "objective": "Introduce regular rotation of the JWT signing key used by the auth service; the current key has not changed in 4 years.",
+    "constraints": [
+      "Access tokens live 15 minutes, refresh tokens 30 days (opaque, stored server-side).",
+      "No forced logout of users."
+    ],
+    "context": "Auth service signs access tokens (RS256) with one private key in a secrets manager; ~60 internal services validate tokens using a public key baked into their config. Services are deployed independently, some only monthly.",
+    "proposed_solution": "Publish a JWKS endpoint with `kid`-identified public keys and move all validators to fetch it (cached for 10 minutes, refetch on unknown `kid`). Once every validator is confirmed to use JWKS (via a metric of tokens validated per method), start rotation: add the new key to JWKS, wait at least cache TTL + max token lifetime before signing with it, keep the old key published until all tokens signed with it have expired, then remove it. Automate this monthly, with alerts on unknown-kid failures.",
+    "decision_type": "security",
+    "risk_level": "high"
+  },
+  "ground_truth": {
+    "proposal_status": "correct",
+    "acceptable_verdicts": [
+      "KEEP"
+    ],
+    "material_issue": "None: standard, safe rotation procedure.",
+    "required_observations": [],
+    "notes": "Correct."
+  },
+  "diagnostics": {}
+}

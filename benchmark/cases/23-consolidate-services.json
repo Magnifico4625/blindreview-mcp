@@ -1,0 +1,31 @@
+{
+  "id": "consolidate-destinations-sound",
+  "title": "Consolidating 140 near-identical microservices into one service (sound)",
+  "category": "multi-module-refactor",
+  "source": {
+    "type": "real_pr",
+    "url": "https://segment.com/blog/goodbye-microservices/",
+    "note": "Adapted from Segment's 'Goodbye Microservices' write-up."
+  },
+  "input": {
+    "objective": "Reduce the operational load of the event-delivery 'destinations' and make shared-library upgrades possible again.",
+    "constraints": [
+      "3 engineers spend most of their time keeping destinations running.",
+      "Delivery semantics (retries, per-destination rate limits) must be preserved."
+    ],
+    "context": "Each of ~140 destination integrations (HTTP APIs of partners) runs as its own service with its own queue and repo, all built from copies of the same template and shared libraries pinned to many different versions. Load per destination varies widely, so each service needs its own autoscaling tuning; many are mostly idle. Test suites hit real partner APIs and are flaky.",
+    "proposed_solution": "Move all destinations into one service in a single repo, with one shared version of the common libraries and per-destination modules. Replace per-destination queues with a centralized system that tracks per-destination retry and backoff state, so one slow partner cannot block others. Record partner HTTP traffic and replay it in tests to make test suites fast and deterministic. Migrate destinations gradually, starting with low-traffic ones, comparing delivery metrics before moving the next batch.",
+    "decision_type": "refactor",
+    "risk_level": "high"
+  },
+  "ground_truth": {
+    "proposal_status": "correct",
+    "acceptable_verdicts": [
+      "KEEP"
+    ],
+    "material_issue": "None: a sound decision for this context (moving away from microservices is not a flaw here).",
+    "required_observations": [],
+    "notes": "Right answer is KEEP; 'keep microservices' advice would worsen things."
+  },
+  "diagnostics": {}
+}

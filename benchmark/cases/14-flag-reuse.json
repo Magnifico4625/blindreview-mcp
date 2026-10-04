@@ -1,0 +1,42 @@
+{
+  "id": "trading-flag-reuse",
+  "title": "Reusing a retired feature flag for a new order-routing feature",
+  "category": "schema-evolution",
+  "source": {
+    "type": "incident",
+    "url": "https://www.sec.gov/litigation/admin/2013/34-70694.pdf",
+    "note": "Adapted from the SEC order on Knight Capital (August 1, 2012): a repurposed flag activated dead code on one of eight servers."
+  },
+  "input": {
+    "objective": "Ship participation in the exchange's new Retail Liquidity Program (RLP) before its launch date next week.",
+    "constraints": [
+      "Order messages between the client gateway and the router have a fixed binary layout; adding a field needs a coordinated release of four teams (≈1 month).",
+      "Go-live is fixed by the exchange."
+    ],
+    "context": "The order router (C++) runs on 8 production servers; deployment is a manual script per server run by an operator. A 1-bit flag in the order message header was used years ago to enable 'Power Peg', an old routing algorithm that was disabled in 2003; its code path is still compiled into the router but unreachable because no client sets the flag. Order volume is ~3M orders/day.",
+    "proposed_solution": "Reuse the retired Power Peg bit to mean 'route via RLP'. The router gets new RLP handling behind that bit and the Power Peg code is removed in the same release. Clients set the bit for RLP-eligible orders from launch day. This avoids changing the binary layout and the multi-team release, and the bit is provably unused today (we checked a month of traffic: zero orders set it).",
+    "decision_type": "implementation",
+    "risk_level": "critical",
+    "environment": "Manual per-server deployment; no automated post-deploy verification of which build each server runs."
+  },
+  "ground_truth": {
+    "proposal_status": "fundamentally_flawed",
+    "acceptable_verdicts": [
+      "REPLACE",
+      "MODIFY"
+    ],
+    "material_issue": "Reusing a flag whose old meaning still exists in deployed binaries makes any server not running the new build (manual deploy to 8 servers, no verification) interpret RLP orders as Power Peg orders and execute the dead algorithm at full volume. Never repurpose a flag while old code may be live; use a new bit/field or first remove the old code everywhere and verify, plus deployment verification and a kill switch.",
+    "required_observations": [
+      "Any server still on the old build interprets the bit with the old meaning (dead code reactivated)",
+      "Manual deploys without verification make partial deployment likely",
+      "Use a new field/bit or remove old code everywhere first; add deploy verification / kill switch"
+    ],
+    "notes": ""
+  },
+  "diagnostics": {
+    "hidden_flaw_keywords": [
+      "old (build|binary|version|code)|partial deploy|not (yet )?deployed",
+      "new (bit|field|flag)|kill switch"
+    ]
+  }
+}

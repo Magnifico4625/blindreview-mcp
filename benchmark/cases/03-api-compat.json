@@ -1,19 +1,40 @@
 {
   "id": "api-id-type-change",
   "title": "Changing a public API id field from number to string",
-  "has_hidden_flaw": true,
-  "expected_verdict": "REPLACE",
-  "acceptable_verdicts": ["MODIFY", "REPLACE"],
-  "hidden_flaw": "Changing `id` from number to string in place breaks every existing typed client (iOS Codable Int64, Android Moshi Long, generated partner SDKs) whose decoders fail on a string; installed app versions cannot be upgraded in lockstep. Needs an additive field (`id_str`) or a new API version plus a deprecation window.",
-  "hidden_flaw_keywords": ["break|breaking|backward", "id_str|additive|new field|v2|new version"],
-  "notes": "Flaw: in-place type change of a field consumed by clients that cannot upgrade in lockstep.",
+  "category": "api-compat",
+  "source": {
+    "type": "synthetic",
+    "note": "Written by the repository author (v0.2 case set)."
+  },
   "input": {
     "objective": "Stop order IDs from being corrupted in JavaScript clients now that IDs are 64-bit Snowflake integers above 2^53.",
-    "constraints": ["Fix must be live within two weeks.", "No change to how IDs are generated."],
+    "constraints": [
+      "Fix must be live within two weeks.",
+      "No change to how IDs are generated."
+    ],
     "context": "GET /v1/orders/{id} and list endpoints return `\"id\": 1234567890123456789` as a JSON number. The web frontend already displays wrong IDs for new orders. Consumers: the web app (deployed with the API), iOS app (Swift Codable model `let id: Int64`), Android app (Kotlin + Moshi `val id: Long`), and ~40 partner integrations using SDKs generated from our OpenAPI spec (`type: integer, format: int64`).",
     "proposed_solution": "Serialize `id` as a JSON string in all v1 responses (\"1234567890123456789\") and change the OpenAPI spec to `type: string`. Representing 64-bit identifiers as strings is standard practice (Twitter's API made the same move, Stripe uses string IDs everywhere), and the numeric value is unchanged, so no data migration is needed. Ship it in the next weekly release together with a changelog entry and regenerated SDKs.",
     "decision_type": "api",
     "risk_level": "high",
     "environment": "Mobile apps are released weekly via the stores; users update at their own pace."
+  },
+  "ground_truth": {
+    "proposal_status": "fundamentally_flawed",
+    "acceptable_verdicts": [
+      "REPLACE",
+      "MODIFY"
+    ],
+    "material_issue": "Changing `id` from number to string in place breaks every existing typed client (iOS Codable Int64, Android Moshi Long, generated partner SDKs) whose decoders fail on a string; installed app versions cannot be upgraded in lockstep. Needs an additive field (`id_str`) or a new API version plus a deprecation window.",
+    "required_observations": [
+      "Existing typed clients (Int64/Long decoders, generated SDKs) break on a string",
+      "Additive field (id_str) or new version with deprecation window"
+    ],
+    "notes": "Flaw: in-place type change of a field consumed by clients that cannot upgrade in lockstep."
+  },
+  "diagnostics": {
+    "hidden_flaw_keywords": [
+      "break|breaking|backward",
+      "id_str|additive|new field|v2|new version"
+    ]
   }
 }

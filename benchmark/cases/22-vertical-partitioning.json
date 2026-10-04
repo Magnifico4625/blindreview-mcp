@@ -1,0 +1,31 @@
+{
+  "id": "vertical-partitioning-sound",
+  "title": "Vertical partitioning of a single Postgres by table groups (sound)",
+  "category": "distributed-systems",
+  "source": {
+    "type": "real_pr",
+    "url": "https://www.figma.com/blog/how-figma-scaled-to-multiple-databases/",
+    "note": "Adapted from Figma's account of scaling Postgres by vertical partitioning."
+  },
+  "input": {
+    "objective": "Get headroom on the main PostgreSQL database, which is at ~65% CPU at peak and growing ~3x per year.",
+    "constraints": [
+      "Small infrastructure team (4 people).",
+      "No multi-month freeze on product work."
+    ],
+    "context": "Single RDS PostgreSQL primary (largest instance class) with read replicas. Load is dominated by a few groups of related tables (files/metadata, comments, organisations/billing) that are rarely joined with each other; cross-group joins exist in ~a dozen code paths. Application connects through PgBouncer.",
+    "proposed_solution": "Partition vertically: move groups of related tables into their own Postgres databases, one group at a time. First remove cross-group joins and transactions from the code (replace with application-level lookups) and add a lint rule to prevent new ones. For each move, replicate the tables to the new database with logical replication, pause writes for that group briefly via PgBouncer, verify replication caught up, switch the group's connections, and resume, keeping the old copy for rollback. Horizontal sharding is deferred until vertical partitioning stops being enough.",
+    "decision_type": "architecture",
+    "risk_level": "high"
+  },
+  "ground_truth": {
+    "proposal_status": "correct",
+    "acceptable_verdicts": [
+      "KEEP"
+    ],
+    "material_issue": "None: a proven approach for this context.",
+    "required_observations": [],
+    "notes": "Correct, real-world proven design."
+  },
+  "diagnostics": {}
+}

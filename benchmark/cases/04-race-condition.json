@@ -1,19 +1,40 @@
 {
   "id": "coupon-double-redeem",
   "title": "Fixing double redemption of single-use coupons",
-  "has_hidden_flaw": true,
-  "expected_verdict": "REPLACE",
-  "acceptable_verdicts": ["MODIFY", "REPLACE"],
-  "hidden_flaw": "An in-process mutex only serialises requests inside one Node.js process; the service runs several replicas behind a load balancer, so the check-then-act race remains across pods. Needs an atomic database operation: conditional UPDATE ... WHERE redeemed_at IS NULL RETURNING, a unique constraint on redemptions, or SELECT ... FOR UPDATE.",
-  "hidden_flaw_keywords": ["replica|pod|instance|multiple process", "atomic|conditional update|where redeemed_?at is null|unique|for update"],
-  "notes": "Flaw: process-local lock for a cross-instance race.",
+  "category": "concurrency",
+  "source": {
+    "type": "synthetic",
+    "note": "Written by the repository author (v0.2 case set)."
+  },
   "input": {
     "objective": "Stop single-use coupons from being redeemed twice.",
-    "constraints": ["Must ship this week.", "Checkout p99 must stay under 800 ms."],
+    "constraints": [
+      "Must ship this week.",
+      "Checkout p99 must stay under 800 ms."
+    ],
     "context": "coupon-service: Node.js 20, Express, Postgres 14 via Prisma. Redeem flow: `const c = await prisma.coupon.findUnique({ where: { code } }); if (c.redeemedAt) throw new AlreadyUsed(); await chargeOrder(order); await prisma.coupon.update({ where: { code }, data: { redeemedAt: new Date(), orderId: order.id } });`. Finance found 312 double redemptions last month; the two redemptions are usually 50-300 ms apart, often from mobile clients that retry after a 2 s timeout.",
     "proposed_solution": "Serialise redemptions per coupon code with an async mutex (`async-mutex`, a Map<code, Mutex> with cleanup when the lock is released). The second concurrent request waits, then sees `redeemedAt` set and fails cleanly with AlreadyUsed. Add a test that fires two concurrent redeem calls for the same code and asserts exactly one succeeds; it fails on main and passes with the fix. About 30 lines, no schema change, no new infrastructure.",
     "decision_type": "debugging",
     "risk_level": "high",
     "environment": "Kubernetes Deployment with HPA (min 4, max 12 replicas) behind a round-robin Service."
+  },
+  "ground_truth": {
+    "proposal_status": "fundamentally_flawed",
+    "acceptable_verdicts": [
+      "REPLACE",
+      "MODIFY"
+    ],
+    "material_issue": "An in-process mutex only serialises requests inside one Node.js process; the service runs several replicas behind a load balancer, so the check-then-act race remains across pods. Needs an atomic database operation: conditional UPDATE ... WHERE redeemed_at IS NULL RETURNING, a unique constraint on redemptions, or SELECT ... FOR UPDATE.",
+    "required_observations": [
+      "In-process mutex does not serialise across replicas",
+      "Use an atomic DB operation (conditional UPDATE / unique constraint / row lock)"
+    ],
+    "notes": "Flaw: process-local lock for a cross-instance race."
+  },
+  "diagnostics": {
+    "hidden_flaw_keywords": [
+      "replica|pod|instance|multiple process",
+      "atomic|conditional update|where redeemed_?at is null|unique|for update"
+    ]
   }
 }

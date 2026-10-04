@@ -1,0 +1,42 @@
+{
+  "id": "autovacuum-disable-hot-table",
+  "title": "Turning autovacuum off on the hottest table during business hours",
+  "category": "db-operations",
+  "source": {
+    "type": "postmortem",
+    "url": "https://blog.sentry.io/transaction-id-wraparound-in-postgres/",
+    "note": "Adapted from Sentry's 2015 transaction ID wraparound outage write-up."
+  },
+  "input": {
+    "objective": "Remove the IO spikes that push p99 write latency of the event ingestion database above 500 ms during business hours.",
+    "constraints": [
+      "No new hardware this quarter.",
+      "Ingestion must keep up with ~25k inserts/s at peak."
+    ],
+    "context": "PostgreSQL 9.4, single primary, ~3 TB. The `events` table receives ~25k inserts/s and periodic bulk deletes of expired rows; it is ~1.8 TB. IO graphs show the spikes coincide with autovacuum workers processing `events` (often running for many hours). Other tables are small and vacuum quickly. Nightly traffic is ~20% of peak.",
+    "proposed_solution": "Set `autovacuum_enabled = false` on `events` and run `VACUUM ANALYZE events` from a cron job every Sunday at 02:00, when traffic is lowest. Keep autovacuum on for all other tables. Since `events` is append-mostly, dead tuples accumulate slowly and a weekly vacuum is enough to control bloat; the bulk deletes already run off-peak. We will watch table bloat in Grafana.",
+    "decision_type": "database",
+    "risk_level": "high",
+    "environment": "PostgreSQL 9.4 with default autovacuum settings."
+  },
+  "ground_truth": {
+    "proposal_status": "fundamentally_flawed",
+    "acceptable_verdicts": [
+      "REPLACE",
+      "MODIFY"
+    ],
+    "material_issue": "Vacuum is not only about bloat: it freezes tuples to prevent transaction ID wraparound. At this write rate, a weekly manual vacuum of a 1.8 TB table may not finish and anti-wraparound vacuum gets deferred; when the limit nears, PostgreSQL forces aggressive vacuum or stops accepting writes. Should tune autovacuum (cost limits, per-table thresholds, more workers), partition the table so old partitions can be dropped instead of deleted, and monitor age(datfrozenxid).",
+    "required_observations": [
+      "Vacuum also prevents transaction ID wraparound (freezing), not just bloat",
+      "A weekly vacuum on a 1.8 TB table may not complete; wraparound leads to forced shutdown / read-only",
+      "Tune autovacuum throttling instead, and/or partition and drop old partitions; monitor XID age"
+    ],
+    "notes": ""
+  },
+  "diagnostics": {
+    "hidden_flaw_keywords": [
+      "wraparound|xid|freez",
+      "partition"
+    ]
+  }
+}

@@ -1,102 +1,92 @@
 import type { Config } from "../src/config.js";
 import type { ReviewerProvider } from "../src/providers/provider.js";
+import { promptHashes } from "../src/reviewer/prompt-fingerprint.js";
 import { Reviewer } from "../src/reviewer/reviewer.js";
-import { ReviewError, type AnyMode, type ReviewResult, type Verdict } from "../src/schemas/review.js";
+import { REVIEW_MODES, ReviewError, type AnyMode, type BenchmarkOnlyMode, type ReviewMode, type Usage } from "../src/schemas/review.js";
 import { toReviewInput, type BenchmarkCase } from "./cases.js";
-import { evaluateRun, summarize, type ModeSummary, type RunEvaluation, type RunOutcome } from "./evaluator.js";
-import { fmtRate, fmtSpread, rng, shuffle } from "./stats.js";
+import { gitInfo } from "./meta.js";
+import { compareCriticBias, compareModes, computeModeMetrics, type Comparison, type ModeMetrics, type RunRecord } from "./metrics.js";
+import { rng, shuffle } from "./stats.js";
 
-export const DEFAULT_MODES: readonly AnyMode[] = ["proposal_first", "proposal_first_2pass", "blind_first"];
+export const MAIN_MODES: readonly AnyMode[] = ["proposal_first", "proposal_first_2pass", "blind_first", "independent_only"];
+export const EXPERIMENT_MODES: readonly AnyMode[] = ["decision_judge"];
+export const DEFAULT_MODES: readonly AnyMode[] = [...MAIN_MODES, ...EXPERIMENT_MODES];
+export const TRANSIENT_CODES = new Set(["TIMEOUT", "PROVIDER_NETWORK_ERROR"]);
 
 export interface BenchmarkOptions {
+  label: string;
   modes?: readonly AnyMode[];
   runs?: number;
   seed?: number;
-  /** Number of (case, run) units executed in parallel. Modes inside a unit run sequentially. */
   concurrency?: number;
+  /** Retries per review for transient errors (timeouts, network, HTTP 429/5xx). Default 2. */
+  retries?: number;
+  retryDelayMs?: number;
+  caseSetHash: string;
+  provider: ReviewerProvider;
   log?: (msg: string) => void;
 }
 
-export interface CaseRun {
-  run: number;
-  mode_order: AnyMode[];
-  results: Partial<Record<AnyMode, { outcome: RunOutcome; evaluation: RunEvaluation }>>;
-}
-
 export interface BenchmarkReport {
+  schema: "blindreview-benchmark/v3";
+  label: string;
   created_at: string;
-  model: string;
+  git: { sha: string | null; dirty: boolean | null };
+  provider: string;
   base_url_host: string;
-  budget: {
+  model: string;
+  config: {
+    reasoning_effort: string | null;
+    reasoning_param: string | null;
+    temperature: number | null;
     max_tokens_per_call: number;
     max_review_tokens: number;
     timeout_ms: number;
-    reasoning_effort: string | null;
-    temperature: number | null;
+    retries: number;
+    concurrency: number;
   };
+  case_set_hash: string;
+  case_count: number;
+  prompt_hashes: Record<string, string>;
   modes: AnyMode[];
   runs: number;
   seed: number;
-  cases: Array<{
-    id: string;
-    title: string;
-    has_hidden_flaw: boolean;
-    expected_verdict: Verdict;
-    acceptable_verdicts: Verdict[];
-    runs: CaseRun[];
-  }>;
-  summary: ModeSummary[];
+  records: RunRecord[];
+  metrics: ModeMetrics[];
+  comparisons: Comparison[];
 }
 
-/**
- * Same model, same budget, same config for every mode; each review gets a fresh Reviewer.
- * Mode order is shuffled per (case, run) with a seeded PRNG so order effects average out
- * and runs are reproducible.
- */
-export async function runBenchmark(
-  cases: BenchmarkCase[],
-  config: Config,
-  provider: ReviewerProvider,
-  options: BenchmarkOptions = {},
-): Promise<BenchmarkReport> {
+function isTransient(err: unknown): boolean {
+  if (!(err instanceof ReviewError)) return false;
+  if (TRANSIENT_CODES.has(err.code)) return true;
+  return err.code === "PROVIDER_HTTP_ERROR" && err.status !== undefined && (err.status === 429 || err.status >= 500);
+}
+
+const addUsage = (a: Usage, b: Usage | undefined): Usage =>
+  b ? { prompt_tokens: a.prompt_tokens + b.prompt_tokens, completion_tokens: a.completion_tokens + b.completion_tokens, total_tokens: a.total_tokens + b.total_tokens } : a;
+
+export function safeHost(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return "invalid-url";
+  }
+}
+
+export async function runBenchmark(cases: BenchmarkCase[], config: Config, options: BenchmarkOptions): Promise<BenchmarkReport> {
   const modes = [...(options.modes ?? DEFAULT_MODES)];
   const runs = Math.max(1, options.runs ?? 3);
   const seed = options.seed ?? 42;
+  const retries = Math.max(0, options.retries ?? 2);
+  const retryDelayMs = options.retryDelayMs ?? 5000;
   const log = options.log ?? (() => {});
   const random = rng(seed);
+  const provider = options.provider;
 
-  const report: BenchmarkReport = {
-    created_at: new Date().toISOString(),
-    model: provider.model,
-    base_url_host: safeHost(config.baseUrl),
-    budget: {
-      max_tokens_per_call: config.maxTokensPerCall,
-      max_review_tokens: config.maxReviewTokens,
-      timeout_ms: config.timeoutMs,
-      reasoning_effort: config.reasoningEffort ?? null,
-      temperature: config.temperature ?? null,
-    },
-    modes,
-    runs,
-    seed,
-    cases: cases.map((c) => ({
-      id: c.id,
-      title: c.title,
-      has_hidden_flaw: c.has_hidden_flaw,
-      expected_verdict: c.expected_verdict,
-      acceptable_verdicts: c.acceptable_verdicts,
-      runs: [],
-    })),
-    summary: [],
-  };
+  const units: Array<{ c: BenchmarkCase; run: number; order: AnyMode[] }> = [];
+  for (let run = 1; run <= runs; run++) for (const c of cases) units.push({ c, run, order: shuffle(modes, random) });
 
-  // Build all units up front (deterministic order + shuffles), then execute with a small pool.
-  const units: Array<{ ci: number; run: number; order: AnyMode[] }> = [];
-  for (let run = 1; run <= runs; run++) {
-    for (let ci = 0; ci < cases.length; ci++) units.push({ ci, run, order: shuffle(modes, random) });
-  }
-
-  const reviewOne = async (c: BenchmarkCase, mode: AnyMode): Promise<RunOutcome> => {
+  const reviewOnce = async (c: BenchmarkCase, mode: AnyMode) => {
     const reviewer = new Reviewer({
       provider,
       maxTokensPerCall: config.maxTokensPerCall,
@@ -105,101 +95,105 @@ export async function runBenchmark(
       blindnessLeakThreshold: config.blindnessLeakThreshold,
       blindnessWarnThreshold: config.blindnessWarnThreshold,
     });
-    const started = performance.now();
-    try {
-      const opts = mode === "proposal_first_2pass" ? { benchmarkMode: mode } : {};
-      return { ok: true, result: await reviewer.review(toReviewInput(c, mode), opts) };
-    } catch (err) {
-      const code = err instanceof ReviewError ? err.code : "INTERNAL_ERROR";
-      const message = err instanceof Error ? err.message : String(err);
-      return { ok: false, error: { code, message }, latency_ms: Math.round(performance.now() - started) };
+    const input = toReviewInput(c);
+    if ((REVIEW_MODES as readonly string[]).includes(mode)) {
+      input.review_mode = mode as ReviewMode;
+      return reviewer.review(input);
     }
+    return reviewer.review(input, { benchmarkMode: mode as BenchmarkOnlyMode });
   };
 
+  const reviewWithRetries = async (c: BenchmarkCase, run: number, mode: AnyMode): Promise<RunRecord> => {
+    const record: RunRecord = {
+      case_id: c.id,
+      run,
+      mode,
+      attempts: 0,
+      retries: [],
+      ok: false,
+      usage_all_attempts: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+      latency_ms: 0,
+    };
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      record.attempts++;
+      const started = performance.now();
+      try {
+        const result = await reviewOnce(c, mode);
+        record.ok = true;
+        record.result = result;
+        record.latency_ms = result.meta.latency_ms;
+        record.usage_all_attempts = addUsage(record.usage_all_attempts, result.meta.usage);
+        return record;
+      } catch (err) {
+        const e = err instanceof ReviewError ? err : new ReviewError("INTERNAL_ERROR", String(err));
+        record.usage_all_attempts = addUsage(record.usage_all_attempts, e.usage);
+        record.latency_ms = Math.round(performance.now() - started);
+        const info = { code: e.code, message: e.message.slice(0, 300) };
+        if (attempt < retries && isTransient(e)) {
+          record.retries.push(info);
+          log(`  retry ${attempt + 1}/${retries} ${c.id} run${run} [${mode}] after ${e.code}`);
+          await new Promise((r) => setTimeout(r, retryDelayMs * (attempt + 1)));
+          continue;
+        }
+        record.error = info;
+        return record;
+      }
+    }
+    return record;
+  };
+
+  const records: RunRecord[] = [];
   let next = 0;
   const worker = async () => {
     while (next < units.length) {
       const unit = units[next++] as (typeof units)[number];
-      const c = cases[unit.ci] as BenchmarkCase;
-      const caseRun: CaseRun = { run: unit.run, mode_order: unit.order, results: {} };
       for (const mode of unit.order) {
-        const outcome = await reviewOne(c, mode);
-        const evaluation = evaluateRun(c, outcome);
-        caseRun.results[mode] = { outcome, evaluation };
+        const r = await reviewWithRetries(unit.c, unit.run, mode);
+        records.push(r);
         log(
-          `${c.id} run${unit.run} [${mode}] ${
-            evaluation.ok
-              ? `${evaluation.verdict} (expected ${c.expected_verdict}) conf=${evaluation.confidence} tokens=${evaluation.total_tokens} ${evaluation.latency_ms}ms`
-              : `ERROR ${evaluation.error_code}`
-          }`,
+          `${unit.c.id} run${unit.run} [${mode}] ${r.ok ? `${r.result?.verdict} tokens=${r.result?.meta.usage.total_tokens} ${r.latency_ms}ms` : `FAILED ${r.error?.code}`}${r.retries.length ? ` (retries: ${r.retries.length})` : ""}`,
         );
       }
-      (report.cases[unit.ci] as BenchmarkReport["cases"][number]).runs.push(caseRun);
     }
   };
   await Promise.all(Array.from({ length: Math.max(1, options.concurrency ?? 1) }, worker));
-  for (const entry of report.cases) entry.runs.sort((a, b) => a.run - b.run);
+  records.sort((a, b) => a.case_id.localeCompare(b.case_id) || a.run - b.run || a.mode.localeCompare(b.mode));
 
-  report.summary = modes.map((mode) =>
-    summarize(
-      mode,
-      report.cases.flatMap((entry, ci) =>
-        entry.runs.map((r) => {
-          const res = r.results[mode] as { outcome: RunOutcome; evaluation: RunEvaluation };
-          const result: ReviewResult | undefined = res.outcome.ok ? res.outcome.result : undefined;
-          return { c: cases[ci] as BenchmarkCase, e: res.evaluation, ...(result ? { result } : {}) };
-        }),
-      ),
-    ),
-  );
-  return report;
-}
+  const comparisons: Comparison[] = [];
+  const has = (m: AnyMode) => modes.includes(m);
+  if (has("blind_first") && has("proposal_first")) comparisons.push(compareModes("Q1", "blind_first", "proposal_first", cases, records, seed));
+  if (has("blind_first") && has("proposal_first_2pass")) comparisons.push(compareModes("Q2", "blind_first", "proposal_first_2pass", cases, records, seed));
+  if (has("independent_only") && has("blind_first")) comparisons.push(compareModes("Q3", "independent_only", "blind_first", cases, records, seed));
+  if (has("decision_judge") && has("proposal_first")) comparisons.push(compareCriticBias("Q4", "decision_judge", "proposal_first", cases, records, seed));
 
-export function toMarkdown(report: BenchmarkReport, cost?: { usd: number; note: string }): string {
-  const b = report.budget;
-  const lines: string[] = [
-    `# BlindReview benchmark ${report.created_at}`,
-    "",
-    `Model \`${report.model}\` via ${report.base_url_host}; ${report.runs} run(s) per case and mode, seed ${report.seed}, mode order shuffled per case/run.`,
-    `Budget per review: ${b.max_review_tokens} tokens (${b.max_tokens_per_call} per call), timeout ${b.timeout_ms} ms, reasoning_effort=${b.reasoning_effort ?? "unset"}, temperature=${b.temperature ?? "provider default"}.`,
-    ...(cost ? [`Estimated cost: $${cost.usd.toFixed(4)} (${cost.note}).`] : []),
-    "",
-    "Mechanical stats only, no LLM judge. Rates show k/n, % and 95% Wilson CI. Definitions: see benchmark/evaluator.ts.",
-    "",
-    "## Summary per mode",
-    "",
-    "| mode | errors | flawed: exact | flawed: acceptable | flawed: under / over / abstain | sound: exact KEEP | sound: acceptable | sound: false alarm (REPLACE) | tokens/review (mean ± sd) | latency ms (mean ± sd) | kw ratio (weak) |",
-    "|---|---|---|---|---|---|---|---|---|---|---|",
-  ];
-  for (const s of report.summary) {
-    lines.push(
-      `| ${s.mode} | ${s.errors}/${s.runs} | ${fmtRate(s.flawed.exact)} | ${fmtRate(s.flawed.acceptable)} | ${s.flawed.under} / ${s.flawed.over} / ${s.flawed.abstain} | ${fmtRate(s.sound.exact_keep)} | ${fmtRate(s.sound.acceptable)} | ${fmtRate(s.sound.false_alarm)} | ${fmtSpread(s.total_tokens)} | ${fmtSpread(s.latency_ms)} | ${s.flawed.kw_ratio_weak.mean ?? "-"} |`,
-    );
-  }
-  lines.push("", "## Verdicts per case (all runs)", "", `| case | flaw? | expected (acceptable) | ${report.modes.join(" | ")} |`, `|---|---|---|${report.modes.map(() => "---").join("|")}|`);
-  for (const c of report.cases) {
-    const cells = report.modes.map((m) => {
-      const tally: Record<string, number> = {};
-      for (const r of c.runs) {
-        const e = r.results[m]?.evaluation;
-        const key = !e ? "-" : e.ok ? (e.verdict as string) : `ERR:${e.error_code}`;
-        tally[key] = (tally[key] ?? 0) + 1;
-      }
-      return Object.entries(tally)
-        .map(([k, n]) => `${k}×${n}`)
-        .join(" ");
-    });
-    lines.push(`| ${c.id} | ${c.has_hidden_flaw ? "yes" : "no"} | ${c.expected_verdict} (${c.acceptable_verdicts.join("/")}) | ${cells.join(" | ")} |`);
-  }
-  return `${lines.join("\n")}\n`;
-}
-
-export function safeHost(url: string): string {
-  try {
-    return new URL(url).host;
-  } catch {
-    return "invalid-url";
-  }
+  return {
+    schema: "blindreview-benchmark/v3",
+    label: options.label,
+    created_at: new Date().toISOString(),
+    git: gitInfo(),
+    provider: provider.name,
+    base_url_host: safeHost(config.baseUrl),
+    model: provider.model,
+    config: {
+      reasoning_effort: config.reasoningEffort ?? null,
+      reasoning_param: config.reasoningParam ?? null,
+      temperature: config.temperature ?? null,
+      max_tokens_per_call: config.maxTokensPerCall,
+      max_review_tokens: config.maxReviewTokens,
+      timeout_ms: config.timeoutMs,
+      retries,
+      concurrency: Math.max(1, options.concurrency ?? 1),
+    },
+    case_set_hash: options.caseSetHash,
+    case_count: cases.length,
+    prompt_hashes: promptHashes(),
+    modes,
+    runs,
+    seed,
+    records,
+    metrics: modes.map((m) => computeModeMetrics(m, cases, records)),
+    comparisons,
+  };
 }
 
 /** Windows-safe timestamp for file names (no ':' characters). */

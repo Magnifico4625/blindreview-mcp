@@ -4,88 +4,95 @@ import { parseArgs } from "node:util";
 import { loadConfig, loadDotEnv } from "../src/config.js";
 import { buildProvider } from "../src/create-server.js";
 import { ALL_MODES, type AnyMode } from "../src/schemas/review.js";
-import { loadCases } from "./cases.js";
-import { DEFAULT_MODES, fileTimestamp, runBenchmark, safeHost, toMarkdown } from "./runner.js";
+import { DEFAULT_CASES_DIR, loadCases } from "./cases.js";
+import { exportSheet } from "./human-review.js";
+import { toExperimentMarkdown, toMarkdown } from "./report.js";
+import { DEFAULT_MODES, fileTimestamp, runBenchmark } from "./runner.js";
 
-const USAGE = `Usage: npm run benchmark -- [casesDir] [options]
-  --runs N            runs per case and mode (default 3)
-  --seed N            seed for the per-case mode order shuffle (default 42)
-  --modes a,b,c       default ${DEFAULT_MODES.join(",")}
-  --only id,id        run only these case ids
-  --concurrency N     parallel (case, run) units (default 1)
-  --out DIR           output directory (default benchmark-results)
-  --price-in USD      optional price per 1M prompt tokens, for a cost estimate
-  --price-out USD     optional price per 1M completion tokens`;
+const USAGE = `Usage: npm run benchmark -- [casesDir] [options]   (default casesDir: ${DEFAULT_CASES_DIR})
+  --label NAME              results go to <out>/<label>/ (required for clarity; default: model id)
+  --runs N                  runs per case and mode (default: BENCHMARK_RUNS or 3)
+  --modes a,b               default ${DEFAULT_MODES.join(",")}
+  --only id,id              only these case ids
+  --seed N                  mode-order shuffle + bootstrap seed (default 42)
+  --concurrency N           parallel (case, run) units (default: BENCHMARK_CONCURRENCY or 2)
+  --retries N               retries per review on transient errors (default 2)
+  --out DIR                 default benchmark-results
+  Provider config (override env): --base-url --model --reasoning-effort --reasoning-param
+  --temperature --max-tokens --max-review-tokens --timeout`;
+
+/** CLI flag -> env var; flags win over .env and the environment. */
+const FLAG_ENV: Record<string, string> = {
+  "base-url": "REVIEWER_BASE_URL",
+  model: "REVIEWER_MODEL",
+  "reasoning-effort": "REVIEWER_REASONING_EFFORT",
+  "reasoning-param": "REVIEWER_REASONING_PARAM",
+  temperature: "REVIEWER_TEMPERATURE",
+  "max-tokens": "REVIEWER_MAX_TOKENS",
+  "max-review-tokens": "MAX_REVIEW_TOKENS",
+  timeout: "REVIEW_TIMEOUT",
+};
 
 function int(name: string, v: string | undefined, fallback: number): number {
-  if (v === undefined) return fallback;
+  if (v === undefined || v === "") return fallback;
   const n = Number(v);
-  if (!Number.isInteger(n) || n < 0) throw new Error(`--${name} must be a non-negative integer`);
+  if (!Number.isInteger(n) || n < 0) throw new Error(`${name} must be a non-negative integer, got ${JSON.stringify(v)}`);
   return n;
 }
 
 async function main(): Promise<void> {
-  const { values, positionals } = parseArgs({
-    allowPositionals: true,
-    options: {
-      out: { type: "string", default: "benchmark-results" },
-      modes: { type: "string", default: DEFAULT_MODES.join(",") },
-      only: { type: "string" },
-      runs: { type: "string" },
-      seed: { type: "string" },
-      concurrency: { type: "string" },
-      "price-in": { type: "string" },
-      "price-out": { type: "string" },
-      help: { type: "boolean", short: "h" },
-    },
-  });
-  if (values.help) {
+  const options = Object.fromEntries(
+    ["label", "runs", "modes", "only", "seed", "concurrency", "retries", "out", ...Object.keys(FLAG_ENV)].map((k) => [k, { type: "string" as const }]),
+  );
+  const { values, positionals } = parseArgs({ allowPositionals: true, options: { ...options, help: { type: "boolean", short: "h" } } });
+  const v = values as Record<string, string | boolean | undefined>;
+  if (v.help) {
     console.log(USAGE);
     return;
   }
-  const dir = path.resolve(positionals[0] ?? path.join("examples", "cases"));
-  const modes = values.modes.split(",").map((m) => m.trim()) as AnyMode[];
-  for (const m of modes) if (!(ALL_MODES as readonly string[]).includes(m)) throw new Error(`Unknown mode ${m}`);
-
   loadDotEnv();
+  for (const [flag, env] of Object.entries(FLAG_ENV)) if (typeof v[flag] === "string") process.env[env] = v[flag] as string;
   const config = loadConfig();
-  let cases = await loadCases(dir);
-  if (values.only) {
-    const ids = new Set(values.only.split(","));
+
+  const modes = String(v.modes ?? DEFAULT_MODES.join(",")).split(",").map((m) => m.trim()) as AnyMode[];
+  for (const m of modes) if (!(ALL_MODES as readonly string[]).includes(m)) throw new Error(`Unknown mode ${m}`);
+  const dir = path.resolve(positionals[0] ?? DEFAULT_CASES_DIR);
+  const loaded = await loadCases(dir);
+  let cases = loaded.cases;
+  if (typeof v.only === "string") {
+    const ids = new Set(v.only.split(","));
     cases = cases.filter((c) => ids.has(c.id));
   }
   if (!cases.length) throw new Error(`No cases found in ${dir}`);
-  const runs = Math.max(1, int("runs", values.runs, 3));
-  console.log(`Running ${cases.length} case(s) x ${modes.join(", ")} x ${runs} run(s) with ${config.model} @ ${safeHost(config.baseUrl)}`);
+  const runs = Math.max(1, int("--runs", v.runs as string | undefined, int("BENCHMARK_RUNS", process.env.BENCHMARK_RUNS, 3)));
+  const concurrency = Math.max(1, int("--concurrency", v.concurrency as string | undefined, int("BENCHMARK_CONCURRENCY", process.env.BENCHMARK_CONCURRENCY, 2)));
+  const label = String(v.label ?? config.model.replace(/[^A-Za-z0-9._-]+/g, "_"));
+  if (!/^[A-Za-z0-9._-]+$/.test(label)) throw new Error("--label may only contain letters, digits, '.', '_' and '-'");
 
-  const report = await runBenchmark(cases, config, buildProvider(config), {
+  console.log(`[${label}] ${cases.length} cases x ${modes.join(", ")} x ${runs} runs, model ${config.model}, concurrency ${concurrency}`);
+  const report = await runBenchmark(cases, config, {
+    label,
     modes,
     runs,
-    seed: int("seed", values.seed, 42),
-    concurrency: Math.max(1, int("concurrency", values.concurrency, 1)),
+    seed: int("--seed", v.seed as string | undefined, 42),
+    concurrency,
+    retries: int("--retries", v.retries as string | undefined, 2),
+    caseSetHash: loaded.hash + (cases.length !== loaded.cases.length ? `-subset${cases.length}` : ""),
+    provider: buildProvider(config),
     log: (m) => console.log(m),
   });
 
-  let cost: { usd: number; note: string } | undefined;
-  if (values["price-in"] !== undefined && values["price-out"] !== undefined) {
-    const pin = Number(values["price-in"]);
-    const pout = Number(values["price-out"]);
-    const prompt = report.summary.reduce((s, m) => s + m.tokens_sum.prompt, 0);
-    const completion = report.summary.reduce((s, m) => s + m.tokens_sum.completion, 0);
-    cost = {
-      usd: (prompt * pin + completion * pout) / 1_000_000,
-      note: `${prompt} prompt + ${completion} completion tokens of successful reviews at $${pin}/$${pout} per 1M; failed calls not included`,
-    };
-  }
-
-  const outDir = path.resolve(values.out);
+  const outDir = path.join(path.resolve(String(v.out ?? "benchmark-results")), label);
   await mkdir(outDir, { recursive: true });
   const base = path.join(outDir, fileTimestamp(new Date(report.created_at)));
-  await writeFile(`${base}.json`, `${JSON.stringify({ ...report, ...(cost ? { cost_estimate: cost } : {}) }, null, 2)}\n`, "utf8");
-  const md = toMarkdown(report, cost);
-  await writeFile(`${base}.md`, md, "utf8");
-  console.log(`\n${md}`);
-  console.log(`Saved ${base}.json and ${base}.md`);
+  await writeFile(`${base}.json`, `${JSON.stringify(report, null, 2)}\n`, "utf8");
+  await writeFile(`${base}.md`, toMarkdown(report), "utf8");
+  await writeFile(`${base}.decision_judge.md`, toExperimentMarkdown(report), "utf8");
+  const sheet = exportSheet(label, cases, report.records);
+  await writeFile(`${base}.review-sheet.csv`, sheet.csv, "utf8");
+  await writeFile(`${base}.sheet-key.json`, `${JSON.stringify(sheet.key, null, 2)}\n`, "utf8");
+  console.log(`\n${toMarkdown(report)}`);
+  console.log(`Saved ${base}.{json,md,decision_judge.md,review-sheet.csv,sheet-key.json}`);
 }
 
 main().catch((err: unknown) => {

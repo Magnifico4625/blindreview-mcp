@@ -1,19 +1,33 @@
 {
   "id": "concurrent-index-sound",
   "title": "Adding a composite index concurrently for a slow query (sound control)",
-  "has_hidden_flaw": false,
-  "expected_verdict": "KEEP",
-  "acceptable_verdicts": ["KEEP", "MODIFY"],
-  "hidden_flaw": "None intended. CREATE INDEX CONCURRENTLY outside a transaction, verified with EXPLAIN, with an INVALID-index cleanup path. KEEP expected; MODIFY with minor notes is acceptable; REPLACE counts as a false alarm.",
-  "hidden_flaw_keywords": [],
-  "notes": "Sound control.",
+  "category": "performance",
+  "source": {
+    "type": "synthetic",
+    "note": "Written by the repository author (v0.2 case set)."
+  },
   "input": {
     "objective": "Fix a slow customer-facing query: listing an account's recent invoices takes 2.5 s p95.",
-    "constraints": ["No downtime.", "Writes to invoices must not be blocked for more than a few seconds."],
+    "constraints": [
+      "No downtime.",
+      "Writes to invoices must not be blocked for more than a few seconds."
+    ],
     "context": "PostgreSQL 15. Query: `SELECT * FROM invoices WHERE account_id = $1 AND status <> 'void' ORDER BY created_at DESC LIMIT 20`. invoices has 60M rows, ~150 writes/s. Existing indexes: PK(id), (status). EXPLAIN ANALYZE shows a sequential scan filtered by account_id. Average 400 invoices per account, max 2M for a few enterprise accounts; 'void' invoices are <1% of rows.",
     "proposed_solution": "Add `CREATE INDEX CONCURRENTLY idx_invoices_account_created ON invoices (account_id, created_at DESC);` in a migration marked non-transactional (CONCURRENTLY cannot run inside a transaction block). Run it off-peak and watch replication lag. Afterwards verify with EXPLAIN (ANALYZE, BUFFERS) that the planner uses an index scan that stops after 20 rows, including for the largest accounts, and compare p95. If the build fails, drop the INVALID index and retry. The status filter stays a post-filter given that void invoices are rare.",
     "decision_type": "performance",
     "risk_level": "medium",
     "environment": "PostgreSQL 15 on RDS, 16 vCPU; migration tool supports per-migration disable_ddl_transaction."
+  },
+  "ground_truth": {
+    "proposal_status": "correct",
+    "acceptable_verdicts": [
+      "KEEP"
+    ],
+    "material_issue": "None: the proposal is a sound decision for the stated context.",
+    "required_observations": [],
+    "notes": "Sound control."
+  },
+  "diagnostics": {
+    "hidden_flaw_keywords": []
   }
 }

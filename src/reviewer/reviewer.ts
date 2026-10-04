@@ -1,7 +1,15 @@
 import { randomUUID } from "node:crypto";
 import type { ReviewerProvider } from "../providers/provider.js";
-import { ReviewError, ReviewInputSchema, type AnyMode, type ReviewInput, type ReviewResult } from "../schemas/review.js";
+import {
+  ReviewError,
+  ReviewInputSchema,
+  type AnyMode,
+  type BenchmarkOnlyMode,
+  type ReviewInput,
+  type ReviewResult,
+} from "../schemas/review.js";
 import type { Telemetry } from "../telemetry/telemetry.js";
+import { runDecisionJudge, runIndependentOnly } from "./benchmark-modes.js";
 import { runBlindFirst, type ModeOutcome } from "./blind-first.js";
 import { proposalContainment } from "./blindness.js";
 import { runProposalFirst } from "./proposal-first.js";
@@ -19,8 +27,8 @@ export interface ReviewerOptions extends SessionLimits {
 }
 
 export interface ReviewOptions {
-  /** Benchmark-only: run the compute-matched control. Not reachable from the MCP tool. */
-  benchmarkMode?: "proposal_first_2pass";
+  /** Benchmark-only modes. Not reachable from the MCP tool. */
+  benchmarkMode?: BenchmarkOnlyMode;
 }
 
 /**
@@ -84,6 +92,7 @@ export class Reviewer {
         err instanceof ReviewError
           ? err
           : new ReviewError("INTERNAL_ERROR", err instanceof Error ? err.message : String(err), { cause: err });
+      error.usage = { ...session.usage };
       await this.options.telemetry?.recordReview({
         id: reviewId,
         review_mode: mode,
@@ -111,7 +120,7 @@ export class Reviewer {
     const warn = Math.min(this.options.blindnessWarnThreshold ?? 0.15, leak);
     const score = proposalContainment(input);
     const pct = `${Math.round(score * 100)}%`;
-    if (mode === "blind_first" && score >= leak) {
+    if ((mode === "blind_first" || mode === "independent_only") && score >= leak) {
       throw new ReviewError(
         "BLINDNESS_LEAK",
         `${pct} of proposed_solution's 5-word phrases already appear in objective/constraints/context/environment/evidence (threshold ${Math.round(leak * 100)}%). Remove the plan from those fields and call again.`,
@@ -124,12 +133,14 @@ export class Reviewer {
   }
 
   private runMode(mode: AnyMode, session: ReviewSession, input: ReviewInput): Promise<ModeOutcome> {
-    const work =
-      mode === "proposal_first"
-        ? runProposalFirst(session, input)
-        : mode === "proposal_first_2pass"
-          ? runProposalFirst2Pass(session, input)
-          : runBlindFirst(session, input);
+    const runners: Record<AnyMode, (s: ReviewSession, i: ReviewInput) => Promise<ModeOutcome>> = {
+      blind_first: runBlindFirst,
+      proposal_first: runProposalFirst,
+      proposal_first_2pass: runProposalFirst2Pass,
+      independent_only: runIndependentOnly,
+      decision_judge: runDecisionJudge,
+    };
+    const work = runners[mode](session, input);
     // Race with the abort signal so a provider that ignores the signal cannot hang the review.
     return new Promise<ModeOutcome>((resolve, reject) => {
       const onAbort = () =>

@@ -1,0 +1,42 @@
+{
+  "id": "quota-system-migration",
+  "title": "Migrating authentication-service quotas to a new quota system",
+  "category": "auth",
+  "source": {
+    "type": "incident",
+    "url": "https://status.cloud.google.com/incident/zall/20013",
+    "note": "Adapted from Google's December 14, 2020 authentication outage (quota system migration reported zero usage)."
+  },
+  "input": {
+    "objective": "Move all internal services from the legacy quota manager to the new quota system and retire the legacy one.",
+    "constraints": [
+      "No user-visible impact.",
+      "The legacy quota manager must be shut down this quarter."
+    ],
+    "context": "The new quota system enforces storage quotas by comparing each service's reported usage against its allocation; allocations are automatically reduced when reported usage stays below the allocation for a grace period (to reclaim unused capacity). Each service's storage usage is reported to the quota manager it is registered with. The user-ID service (used by every login) stores account data in a distributed database whose writes are rejected when quota is exceeded.",
+    "proposed_solution": "Migrate services in waves: register each service in the new system, copy its current allocation, then deregister it from the legacy manager. The user-ID service goes in wave 3. Automatic quota reduction stays enabled for all services because it is the main efficiency gain of the new system, and the grace period gives us weeks of buffer before any allocation changes. Dashboards in the new system will show usage and allocation per service.",
+    "decision_type": "architecture",
+    "risk_level": "high",
+    "environment": "Global, multi-region; the user-ID service's database replicates writes across regions."
+  },
+  "ground_truth": {
+    "proposal_status": "materially_flawed",
+    "acceptable_verdicts": [
+      "MODIFY",
+      "REPLACE"
+    ],
+    "material_issue": "If a service is registered in the new system but its usage is still reported by (or missing from) the legacy path, the new system sees zero usage, and after the grace period automatic reduction shrinks the allocation below real usage; for the user-ID service that rejects writes and breaks every login. Needs validation that reported usage matches reality before enabling auto-reduction, a floor/manual approval for critical services, and alerts on large allocation drops.",
+    "required_observations": [
+      "New system may see zero/incorrect usage during migration (reporting path not switched or broken)",
+      "Auto-reduction after grace period can cut a critical service below its real usage",
+      "Disable/guard auto-reduction for critical services until reported usage is validated; alert on drops"
+    ],
+    "notes": ""
+  },
+  "diagnostics": {
+    "hidden_flaw_keywords": [
+      "zero usage|reported usage|usage (is|was) (missing|wrong|not reported)|mismatch",
+      "disable|exempt|floor|manual approval|guard"
+    ]
+  }
+}

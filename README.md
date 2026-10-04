@@ -250,55 +250,90 @@ npm run outcome -- <review_id> --accepted true --rework false --useful true
 
 or call the `record_outcome` MCP tool with `review_id`, `accepted_review`, `later_rework_required`, `review_was_useful`.
 
-## Benchmark (blind_first vs controls)
+## Benchmark (v0.3: blind_first vs controls)
+
+The benchmark tests one question: does `blind_first` give better review decisions than ordinary review **at comparable compute**? It is an evaluation harness only; none of the benchmark-only modes are exposed through the MCP tool.
 
 ```bash
-npm run benchmark -- ./examples/cases --runs 3 --seed 42
+npm run benchmark -- --label my-model --model vendor/model --base-url https://openrouter.ai/api/v1 \
+  --runs 3 --concurrency 3 --timeout 240000 --out benchmark-results
 ```
 
-Options: `--runs N` (default 3), `--seed N` (mode order shuffle), `--modes`, `--only <id,id>`, `--concurrency N`, `--out <dir>`, `--price-in/--price-out` (USD per 1M tokens, for a cost estimate). Output: `benchmark-results/<timestamp>.json` (every run, side by side) and `<timestamp>.md` (summary).
+All config is external (CLI flag overrides env): `--base-url` (`REVIEWER_BASE_URL`), `--model` (`REVIEWER_MODEL`), `--reasoning-effort` (`REVIEWER_REASONING_EFFORT`), `--reasoning-param`, `--temperature` (`REVIEWER_TEMPERATURE`), `--max-tokens` per call (`REVIEWER_MAX_TOKENS`), `--max-review-tokens` total cap per review (`MAX_REVIEW_TOKENS`), `--timeout` (`REVIEW_TIMEOUT`), `--runs` (`BENCHMARK_RUNS`, default 3), `--concurrency` (`BENCHMARK_CONCURRENCY`, default 2), `--retries` (default 2), `--seed`, `--modes`, `--only`, `--label`. The API key is read only from `REVIEWER_API_KEY` and is never written to results.
 
-Modes, all with the same model, config and token budget:
+Output: `<out>/<label>/<timestamp>.json` (every run), `.md` (main report), `.decision_judge.md` (separate experiment), `.review-sheet.csv` + `.sheet-key.json` (human review). Every result records provider, base URL host, model, reasoning effort, token limits, temperature, timeout, timestamp, git SHA + dirty flag, case-set hash and prompt hashes. Runs of different models are independent; `npm run benchmark:compare -- <report.json> <report.json> ...` puts several labels side by side without declaring a winner.
+
+### Modes
 
 | mode | what the reviewer sees | calls |
 |---|---|---|
 | `proposal_first` | problem + proposal, single critique (public control mode) | 1 |
-| `proposal_first_2pass` | **benchmark-only** compute-matched control: problem + proposal; pass 1 maps assumptions/alternatives/failure modes, pass 2 gives the verdict | 2 |
-| `blind_first` | pass 1 without the proposal, pass 2 with it revealed | 2 |
+| `proposal_first_2pass` | benchmark-only compute-matched control: problem + proposal; pass 1 maps assumptions/alternatives/failure modes, pass 2 gives the verdict (same session) | 2 |
+| `blind_first` | pass 1 without the proposal, pass 2 reveals it in the same session | 2 |
+| `independent_only` | benchmark-only: pass 1 = the blind_first Phase 1 prompt (never the proposal); pass 2 is a **fresh session** that gets only the Phase-1 structured position (JSON) + the proposal and returns the verdict | 2 |
+| `decision_judge` | separate experiment: problem + proposal, single pass, instructed to intervene only for a material problem and to value preserving a correct proposal equally | 1 |
 
-`proposal_first_2pass` separates "blindness" from "the reviewer simply thought longer". It is not exposed through the MCP tool. The mode order is shuffled per case and run with a seeded PRNG.
+Modes 2–4 use the same model, the same max tokens per call, the same total cap per review and the same reasoning effort and temperature (all from one config); actual tokens are reported. The order of modes is shuffled per (case, run) with a seeded PRNG.
 
-Cases (`examples/cases/*.json`): 6 with a planted fundamental flaw (per-user authz cache with TTL-only expiry; integer→numeric column retype + rename on a 900M-row table during rolling deploys; public API `id` number→string; check-then-act race "fixed" with an in-process mutex on a multi-replica service; big-bang multi-service billing rewrite; RabbitMQ→Redis Pub/Sub for jobs that include payment webhooks) and 5 sound controls (concurrent index; additive `id_str` field; transactional outbox; per-request DataLoader; strangler-style billing refactor with golden tests and shadow run). Flawed proposals are written to sound convincing, and the facts needed to find the flaw are present but the consequence is not spelled out. Each case has `expected_verdict` and `acceptable_verdicts`; `hidden_flaw`, `notes` and keywords are human-only and never sent to the reviewer (tested).
+**Why `independent_only` is designed this way.** The requirement is that the reviewer never receives `proposed_solution`, but a verdict on a proposal cannot be produced without someone looking at it. Options considered: (a) an LLM judge that sees the ground truth decides — rejected, it puts an LLM in the scoring loop; (b) only human scoring of required observations — kept as a supplementary measure (see human review), but it gives no verdict; (c) the chosen design: the independent position is produced blind, and a separate fresh call converts it into a verdict without the Phase-1 transcript. Compared with `blind_first`, this removes the in-session Reveal/Compare trajectory (self-anchoring on its own reasoning, or being pulled back toward the proposal on reveal). Known confound: the comparer does not see the problem statement (objective/context), only the position, so a difference vs `blind_first` can also come from that missing context. The independent reviewer itself never sees the proposal (tested with a sentinel); the comparer never sees the blind fields (tested).
 
-`benchmark/evaluator.ts` computes mechanical statistics only, without an LLM judge:
+### Cases
 
-- **exact**: verdict equals `expected_verdict`. **acceptable**: verdict is in `acceptable_verdicts` (flawed cases: MODIFY or REPLACE; sound cases: KEEP or MODIFY).
-- Severity KEEP < MODIFY < REPLACE. **under**: less severe than every acceptable verdict (KEEP on a flawed case). **over**: more severe (REPLACE on a sound case). `INSUFFICIENT_EVIDENCE` counts as an abstention.
-- **false alarm**: REPLACE on a sound control.
-- Rates are reported with 95% Wilson intervals; tokens and latency as mean ± sd.
-- Keyword ratio: a *weak* heuristic (narrow regex groups per flawed case). It only shows the topic was mentioned.
+25 cases, one JSON file per case in `benchmark/cases/` (structure ready for 30–50; add files, the loader validates them). 13 flawed (materially or fundamentally), 12 correct. 12 are adapted from public material (postmortems, incident writeups, engineering blogs, an SEC order), 13 are synthetic (11 migrated from v0.2 plus 2 new). The source URL is kept in metadata only.
 
-### Results: v1 run (2026-10-04)
+```json
+{ "id": "...", "title": "...", "category": "...",
+  "source": { "type": "real_pr|reverted_pr|postmortem|issue|incident|synthetic", "url": "...", "note": "..." },
+  "input": { "objective": "...", "constraints": ["..."], "context": "...", "environment": "...", "evidence": "...",
+             "proposed_solution": "...", "decision_type": "...", "risk_level": "..." },
+  "ground_truth": { "proposal_status": "correct|materially_flawed|fundamentally_flawed|insufficient_information",
+                    "acceptable_verdicts": ["REPLACE", "MODIFY"], "material_issue": "...",
+                    "required_observations": ["..."], "notes": "..." },
+  "diagnostics": { "hidden_flaw_keywords": ["regex", "..."] } }
+```
 
-`xiaomi/mimo-v2.6-flash` via OpenRouter, 11 cases × 3 modes × 3 runs = 99 reviews, seed 42, budget 20k tokens per review (4k per call), timeout 120 s, reasoning effort and temperature at provider defaults. Full data: [`benchmark-results/sample/2026-10-04T08-53-26-127Z.md`](benchmark-results/sample/2026-10-04T08-53-26-127Z.md) / `.json`. Cost: ≈ $0.069 estimated from token counts; OpenRouter-reported spend for the whole fix pass (this run plus a 2-case smoke run) was $0.073.
+- The reviewer request is built by an explicit pick of `case.input` fields only. A test runs every case through every mode with sentinels planted in `source`, `ground_truth` and `diagnostics` and checks that neither the sentinel nor any ground-truth string reaches any provider request.
+- `acceptable_verdicts[0]` is the expected primary verdict. Correct proposals accept **KEEP only**; flawed proposals never accept KEEP.
+- Every case passes the blindness overlap check below the warn threshold (tested).
+- Real-sourced cases are compact, self-contained adaptations; no private code is copied. Their known outcome (what actually happened) may still be in the reviewer model's training data, which is a contamination risk.
 
-| mode | errors | flawed: exact | flawed: acceptable | flawed: under / over | sound: exact KEEP | sound: acceptable | sound: false alarm (REPLACE) | tokens/review | latency, s |
-|---|---|---|---|---|---|---|---|---|---|
-| proposal_first | 2/33 | 11/17 (65%, CI 41–83) | 17/17 (CI 82–100) | 0 / 0 | 1/14 (7%, CI 1–32) | 14/14 (CI 79–100) | 0/14 (CI 0–22) | 1875 ± 464 | 35 ± 14 |
-| proposal_first_2pass | 1/33 | 12/17 (71%, CI 47–87) | 17/17 (CI 82–100) | 0 / 0 | 0/15 (0%, CI 0–20) | 15/15 (CI 80–100) | 0/15 (CI 0–20) | 4360 ± 651 | 38 ± 15 |
-| blind_first | 1/33 | 12/17 (71%, CI 47–87) | 17/17 (CI 82–100) | 0 / 0 | 2/15 (13%, CI 4–38) | 15/15 (CI 80–100) | 0/15 (CI 0–20) | 4524 ± 1031 | 36 ± 18 |
+### Metrics (mechanical, no LLM judge)
 
-Errors: 3 × `TIMEOUT` (proposal_first ×2, blind_first ×1; run with 6 parallel workers) and 1 × `MALFORMED_RESPONSE` (proposal_first_2pass).
+- **Decision accuracy**: verdict ∈ `acceptable_verdicts`. Shown over successful runs and **strict** (failed runs count as wrong).
+- **Correct KEEP**: KEEP rate on correct proposals. **Defect detection**: MODIFY or REPLACE on flawed proposals. **Exact verdict**: verdict = primary expected verdict.
+- **False intervention**: MODIFY on a correct proposal. **Severe false intervention**: REPLACE on a correct proposal. **Insufficient-evidence rate**.
+- Tokens and latency: mean and median; relative token cost vs `proposal_first`; tokens of failed attempts are counted in the cost section.
+- Keyword hit-rate: **diagnostic only** (narrow regexes), not a quality measure.
+- Rates have 95% Wilson intervals. Mode differences use a paired cluster bootstrap over cases (5000 resamples, seeded).
+- Failures never shrink denominators silently: expected / successful / failed / failure reasons and retries are reported per mode. Transient errors (timeout, network, HTTP 429/5xx) are retried up to `--retries` times with backoff and logged.
 
-Observations, stated neutrally:
+### Pre-registered decision rules
 
-- On this run the three modes are **not distinguishable**: every mode gave an acceptable verdict on every successful flawed run, and no mode returned REPLACE on a sound control. The differences in exact-match rates are 1–2 runs and fall well inside the confidence intervals.
-- The sound controls are almost always answered with MODIFY in every mode (exact KEEP 0–13%). So with this model the KEEP/MODIFY boundary carries little signal, and "acceptable" on controls is not a demanding metric.
-- Exact-match misses on flawed cases are mostly MODIFY where REPLACE was expected (e.g. `api-id-type-change`: MODIFY in 9/9 runs across all modes). blind_first gave MODIFY instead of REPLACE on `coupon-double-redeem` in 1/3 runs, where both controls gave REPLACE 3/3.
-- blind_first costs about 2.4× the tokens of proposal_first and about the same as the compute-matched `proposal_first_2pass`.
-- Limits of this evidence: the cases were written by the tool's author, there is a single lightweight model, n is small (17 flawed and 15 sound runs per mode), and there are ceiling effects on the flawed cases. A real test needs harder cases written by someone else, more models and more runs.
+Written and committed before the v0.3.0 runs (`benchmark/thresholds.ts`). Δ = metric(A) − metric(B), positive = A better, with the 95% paired bootstrap CI [lo, hi]:
 
-The superseded v0 smoke run is in [`benchmark-results/sample/v0/`](benchmark-results/sample/v0/).
+| label | rule |
+|---|---|
+| clear signal | Δ ≥ +0.10 and lo > 0 |
+| weak signal | Δ ≥ +0.05 and lo > −0.05 (and not clear) |
+| no observed advantage | Δ ≤ 0 |
+| inconclusive | anything else |
+
+- Q1 `blind_first` vs `proposal_first`, Q2 `blind_first` vs `proposal_first_2pass` (**main test**), Q3 `independent_only` vs `blind_first`: primary metric = strict decision accuracy.
+- Q4 `decision_judge` vs `proposal_first` (critic bias): primary metric = reduction in intervention (MODIFY/REPLACE) on correct proposals; the label gets the suffix "(with defect-detection loss)" if defect detection drops by more than 0.10.
+
+### Human review (no LLM judge)
+
+Each run exports `<ts>.review-sheet.csv`: one row per (flawed-case result, required observation), with the reviewer's risks / alternative / probe and an empty `hit` column (yes/no). The mode is hidden behind an item id (key in `<ts>.sheet-key.json`) so the human scorer is blind to the mode. After filling it in: `npm run benchmark:ingest -- <ts>.review-sheet.csv <ts>.sheet-key.json` prints required-observation coverage per mode.
+
+### Honest limits of the blindness protection
+
+- The overlap check is lexical. A semantic paraphrase of the plan in `context` cannot be reliably detected by string checks.
+- Blind isolation is guaranteed only against an honest caller. A caller that writes its plan into the blind fields defeats it.
+- `decision_type` and `risk_level` are visible to Phase 1 by design.
+
+### Results
+
+See [`benchmark-results/sample/`](benchmark-results/sample/) (per-label folders; v1 and v0 runs of v0.2 kept for history).
 
 ## Development
 
@@ -318,6 +353,8 @@ src/reviewer/reviewer.ts      review orchestration, timeout, blindness check, te
 src/reviewer/blind-first.ts   phase 1 (blind) + phase 2 (reveal) in one session
 src/reviewer/blindness.ts     deterministic leak check (5-gram containment)
 src/reviewer/proposal-first-2pass.ts  benchmark-only compute-matched control
+src/reviewer/benchmark-modes.ts      benchmark-only independent_only + decision_judge
+src/reviewer/prompt-fingerprint.ts   prompt hashes (frozen by tests/prompt-freeze.test.ts)
 src/reviewer/proposal-first.ts control mode
 src/reviewer/session.ts       per-review state, token budget, JSON validation + 1 repair retry
 src/reviewer/prompts.ts       prompt builders (phase 1 builder only accepts BlindInput)
@@ -328,18 +365,18 @@ src/gate/decision-gate.ts     deterministic gate
 src/schemas/review.ts         Zod schemas and types
 src/telemetry/telemetry.ts    opt-in JSONL telemetry
 src/cli/outcome.ts            outcome marking CLI
-benchmark/                    cli (entry), runner, evaluator, stats, case loader
-examples/cases/               benchmark cases
+benchmark/                    cli, runner, metrics, stats, thresholds, report, compare, human review
+benchmark/cases/              benchmark cases (one file per case)
 ```
 
 New providers (Anthropic, Gemini, native OpenRouter/xAI, local runtimes) implement `ReviewerProvider` in `src/providers/`; nothing else changes.
 
 ## Limitations
 
-- Research MVP: the hypothesis is **not** established. The cases were written by the same author as the tool, there is one reviewer model, and n is small (11 cases × 3 runs). The keyword metric is weak.
+- Research MVP: the hypothesis is **not** established (see benchmark results). Synthetic cases were written by the tool's author; real-sourced cases may be in model training data. The keyword metric is diagnostic only.
 - The reviewer only knows what the main agent puts into `context`/`evidence`; it has no repo access or tools. Garbage in, garbage out.
 - Blind-first costs roughly 2-2.5x the tokens of a single-pass critique (two calls; Phase 2 resends Phase 1).
-- The blindness check is lexical: it detects copied or near-copied plans, not a reworded plan hidden in `context`.
+- The blindness check is lexical: it detects copied or near-copied plans; a semantic paraphrase hidden in `context` cannot be reliably detected by string checks. Blind isolation is not guaranteed against a dishonest caller.
 - Token budget is a near-hard cap (see budget policy), not an exact one.
 - Only an OpenAI-compatible adapter is implemented.
 

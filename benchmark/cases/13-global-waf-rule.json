@@ -1,0 +1,42 @@
+{
+  "id": "global-waf-rule-push",
+  "title": "Pushing new managed WAF rules to the whole edge at once",
+  "category": "security",
+  "source": {
+    "type": "postmortem",
+    "url": "https://blog.cloudflare.com/details-of-the-cloudflare-outage-on-july-2-2019/",
+    "note": "Adapted from Cloudflare's July 2, 2019 outage (a WAF regex with catastrophic backtracking deployed globally)."
+  },
+  "input": {
+    "objective": "Shorten the time from a new web-attack disclosure to protection at the edge from ~2 days to under 1 hour.",
+    "constraints": [
+      "Customers expect zero-day protection on the day of disclosure.",
+      "WAF runs inline on every HTTP request on every edge machine."
+    ],
+    "context": "Managed WAF rules are regular expressions (PCRE-compatible engine) evaluated in the request path by the same proxy processes that serve all customer traffic. Today new rules go through a staged pipeline: dogfood PoP, then 1%, 10%, 100% over ~2 days. A global key-value store (Quicksilver) already replicates config to all machines worldwide within seconds. Rules are tested in CI against a corpus of known attack payloads and a set of benign requests.",
+    "proposed_solution": "Add an expedited path for WAF rules: once a rule passes the CI payload corpus, publish it through Quicksilver to all machines immediately, first in 'log' mode for 10 minutes to check match volume, then flip it to 'block' globally. This uses infrastructure that already handles our most time-critical config, and the log-mode step gives us a safety window before any request is blocked.",
+    "decision_type": "security",
+    "risk_level": "critical",
+    "environment": "~200 PoPs, proxies are CPU-bound at peak; rule evaluation shares the CPU with TLS and HTTP processing."
+  },
+  "ground_truth": {
+    "proposal_status": "fundamentally_flawed",
+    "acceptable_verdicts": [
+      "REPLACE",
+      "MODIFY"
+    ],
+    "material_issue": "Log mode still evaluates the regex on every request, so a rule with pathological backtracking exhausts CPU on every machine at once; skipping the staged rollout removes the only protection against that blast radius. Needs staged rollout even on the fast path (canary PoP first, automatic rollback on CPU), regex complexity limits/linear-time engine and per-rule CPU guards.",
+    "required_observations": [
+      "Log mode still executes the regex; a slow/backtracking rule hurts CPU globally",
+      "Global instant push removes blast-radius protection (no canary)",
+      "Need canary + automatic rollback, regex CPU/complexity limits or a linear-time engine"
+    ],
+    "notes": ""
+  },
+  "diagnostics": {
+    "hidden_flaw_keywords": [
+      "backtrack|catastrophic|regex (cpu|performance)|redos",
+      "canary|staged|gradual"
+    ]
+  }
+}

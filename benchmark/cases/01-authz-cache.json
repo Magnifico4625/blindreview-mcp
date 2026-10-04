@@ -1,12 +1,11 @@
 {
   "id": "authz-cache-ttl",
   "title": "Caching per-user authorization decisions with TTL expiry",
-  "has_hidden_flaw": true,
-  "expected_verdict": "MODIFY",
-  "acceptable_verdicts": ["MODIFY", "REPLACE"],
-  "hidden_flaw": "Revocations (unshare, role removal, offboarding) stay effective for up to 15 minutes on every pod, because entries only expire by TTL. For authorization data staleness is a security bug. Fix: event-driven invalidation from the existing permission events (or versioned keys) with TTL only as a backstop, and never cache in a way that can fail open.",
-  "hidden_flaw_keywords": ["revo[ck]", "invalidat"],
-  "notes": "Flaw: TTL-only invalidation on authz data. Direction (caching) is fine, so MODIFY is expected.",
+  "category": "caching",
+  "source": {
+    "type": "synthetic",
+    "note": "Written by the repository author (v0.2 case set)."
+  },
   "input": {
     "objective": "Cut p95 latency of GET /documents/:id, which is dominated by authorization checks against the permissions service.",
     "constraints": [
@@ -18,6 +17,28 @@
     "decision_type": "architecture",
     "risk_level": "high",
     "environment": "Kubernetes, 12 replicas, Redis 7 cluster, Kafka 3.6, Node.js 20.",
-    "evidence": ["APM: 71% of request time is spent in permissions-service.check", "Log replay hit rate: 85% at 15 min window, 78% at 2 min window"]
+    "evidence": [
+      "APM: 71% of request time is spent in permissions-service.check",
+      "Log replay hit rate: 85% at 15 min window, 78% at 2 min window"
+    ]
+  },
+  "ground_truth": {
+    "proposal_status": "materially_flawed",
+    "acceptable_verdicts": [
+      "MODIFY",
+      "REPLACE"
+    ],
+    "material_issue": "Revocations (unshare, role removal, offboarding) stay effective for up to 15 minutes on every pod, because entries only expire by TTL. For authorization data staleness is a security bug. Fix: event-driven invalidation from the existing permission events (or versioned keys) with TTL only as a backstop, and never cache in a way that can fail open.",
+    "required_observations": [
+      "Revocations (unshare/offboarding) remain effective until TTL expiry",
+      "Invalidate from permission-events (or versioned keys); TTL only as backstop"
+    ],
+    "notes": "Flaw: TTL-only invalidation on authz data. Direction (caching) is fine, so MODIFY is expected."
+  },
+  "diagnostics": {
+    "hidden_flaw_keywords": [
+      "revo[ck]",
+      "invalidat"
+    ]
   }
 }

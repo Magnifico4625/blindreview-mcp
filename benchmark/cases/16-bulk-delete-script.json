@@ -1,0 +1,41 @@
+{
+  "id": "bulk-site-deletion-script",
+  "title": "Bulk deprovisioning script for a retired add-on",
+  "category": "background-jobs",
+  "source": {
+    "type": "postmortem",
+    "url": "https://www.atlassian.com/engineering/post-incident-review-april-2022-outage",
+    "note": "Adapted from Atlassian's April 2022 post-incident review (deletion script run with the wrong IDs and in permanent-delete mode)."
+  },
+  "input": {
+    "objective": "Remove the retired 'Insight Legacy' add-on from the ~900 customer sites that still have it installed, before its backend is shut down at the end of the month.",
+    "constraints": [
+      "The add-on's backend will be switched off on the 30th.",
+      "Customers must not lose data of other products on their sites."
+    ],
+    "context": "The platform has a site-management API `DELETE /sites/{id}/objects?ids=...&mode=mark|permanent` that accepts IDs of any deletable object (sites, products, add-on installations). `mark` soft-deletes with a 14-day restore window; `permanent` purges immediately. Add-on installations and sites both have 24-character IDs of the same format. The product team will send the list of IDs to delete. Recovery of permanently deleted sites requires restoring from backups site by site.",
+    "proposed_solution": "Write a batch job that reads the ID list provided by the product team, calls the deletion API with `mode=permanent` in batches of 30 with a 2 s pause between batches, and logs every response. Permanent mode guarantees the legacy data is really gone before the backend is decommissioned, which also satisfies the data-minimisation policy. We will run it over the weekend to minimise customer impact and have on-call watching error rates.",
+    "decision_type": "implementation",
+    "risk_level": "high"
+  },
+  "ground_truth": {
+    "proposal_status": "fundamentally_flawed",
+    "acceptable_verdicts": [
+      "REPLACE",
+      "MODIFY"
+    ],
+    "material_issue": "The job deletes whatever IDs it is given: since sites and add-on installations share an ID format and the same endpoint, a wrong list deletes whole customer sites, and permanent mode removes the 14-day undo path. Must validate object types (only add-on installations), use mark mode first, do a dry run and a small canary batch, and keep restore capability until verified.",
+    "required_observations": [
+      "The API cannot distinguish a site ID from an add-on ID; validate object type before deleting",
+      "Permanent mode removes the recovery window; use soft delete (mark) first",
+      "Dry run / canary batch / verification of the ID list"
+    ],
+    "notes": ""
+  },
+  "diagnostics": {
+    "hidden_flaw_keywords": [
+      "soft.?delete|mark mode|mode=mark|recover|restore",
+      "dry.?run|canary|validat|verify"
+    ]
+  }
+}

@@ -67,3 +67,67 @@ export function fmtSpread(s: Spread, unit = ""): string {
   if (s.mean === null) return "-";
   return `${Math.round(s.mean)}${unit} ± ${Math.round(s.sd ?? 0)}`;
 }
+
+export function median(xs: number[]): number | null {
+  if (!xs.length) return null;
+  const s = [...xs].sort((a, b) => a - b);
+  const mid = Math.floor(s.length / 2);
+  return s.length % 2 ? (s[mid] as number) : ((s[mid - 1] as number) + (s[mid] as number)) / 2;
+}
+
+export function mean(xs: number[]): number | null {
+  return xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null;
+}
+
+export interface DiffCI {
+  diff: number | null;
+  ci95: [number, number] | null;
+  method: string;
+  clusters: number;
+}
+
+/**
+ * Paired cluster bootstrap over cases. `values[mode][caseIndex]` = list of 0/1 outcomes for the runs
+ * of that case (null entries = excluded). A resample draws cases with replacement and recomputes the
+ * pooled rate of A and B over the same cases, so the case-level pairing is preserved.
+ */
+export function pairedBootstrapDiff(
+  a: Array<Array<0 | 1>>,
+  b: Array<Array<0 | 1>>,
+  options: { iterations?: number; seed?: number } = {},
+): DiffCI {
+  const n = Math.min(a.length, b.length);
+  const iterations = options.iterations ?? 5000;
+  const random = rng(options.seed ?? 1234);
+  const pooled = (idx: number[], m: Array<Array<0 | 1>>): number | null => {
+    let k = 0;
+    let t = 0;
+    for (const i of idx) {
+      const runs = m[i] as Array<0 | 1>;
+      for (const v of runs) {
+        k += v;
+        t++;
+      }
+    }
+    return t ? k / t : null;
+  };
+  const all = Array.from({ length: n }, (_, i) => i);
+  const pa = pooled(all, a);
+  const pb = pooled(all, b);
+  if (pa === null || pb === null) return { diff: null, ci95: null, method: "paired case bootstrap", clusters: n };
+  const diffs: number[] = [];
+  for (let it = 0; it < iterations; it++) {
+    const idx = Array.from({ length: n }, () => Math.floor(random() * n));
+    const ra = pooled(idx, a);
+    const rb = pooled(idx, b);
+    if (ra !== null && rb !== null) diffs.push(ra - rb);
+  }
+  diffs.sort((x, y) => x - y);
+  const q = (p: number) => diffs[Math.min(diffs.length - 1, Math.max(0, Math.floor(p * diffs.length)))] as number;
+  return {
+    diff: round(pa - pb),
+    ci95: diffs.length ? [round(q(0.025)), round(q(0.975))] : null,
+    method: `paired case bootstrap (${iterations} resamples)`,
+    clusters: n,
+  };
+}

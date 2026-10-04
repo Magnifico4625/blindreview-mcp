@@ -1,0 +1,41 @@
+{
+  "id": "orders-column-migration",
+  "title": "Retyping and renaming a column on a 900M-row table",
+  "category": "db-migration",
+  "source": {
+    "type": "synthetic",
+    "note": "Written by the repository author (v0.2 case set)."
+  },
+  "input": {
+    "objective": "Support currencies with three-decimal minor units (KWD, BHD, OMR) in order amounts.",
+    "constraints": [
+      "Checkout SLO is 99.95% monthly.",
+      "The change must ship in the release planned for next Tuesday."
+    ],
+    "context": "PostgreSQL 15 primary with 2 streaming replicas. `orders` has ~900M rows (~410 GB with indexes) and ~1,200 writes/s at peak, ~150/s at night. Amounts are stored in `orders.amount INTEGER` (cents). Django 4.2 monolith; three reporting jobs read `orders.amount` via raw SQL.",
+    "proposed_solution": "One Django migration: `ALTER TABLE orders ALTER COLUMN amount TYPE NUMERIC(19,4); ALTER TABLE orders RENAME COLUMN amount TO amount_minor;`. Update the model, the serializers and the three reporting queries in the same PR. Schedule the deploy at night when write traffic is lowest. PostgreSQL DDL is transactional, so the migration is atomic: it is either fully applied or rolled back, and NUMERIC(19,4) holds every existing integer value exactly.",
+    "decision_type": "database",
+    "risk_level": "critical",
+    "environment": "Kubernetes rolling deploys take ~25 minutes; migrations run in a pre-deploy job before pods are replaced. App role has statement_timeout=30s; the migration role has none."
+  },
+  "ground_truth": {
+    "proposal_status": "fundamentally_flawed",
+    "acceptable_verdicts": [
+      "REPLACE",
+      "MODIFY"
+    ],
+    "material_issue": "ALTER COLUMN TYPE integer->numeric rewrites the 900M-row table under an ACCESS EXCLUSIVE lock (hours of blocked checkout), and renaming the column in the same release breaks the previous app version that keeps serving traffic during the rolling deploy; rollback is not possible. Needs expand/contract: new nullable column, dual-write, batched backfill, switch reads, drop later.",
+    "required_observations": [
+      "ALTER COLUMN TYPE rewrites the table under an ACCESS EXCLUSIVE lock",
+      "Rename breaks the old app version still serving during the rolling deploy",
+      "Use expand/contract: new column, dual-write, batched backfill, later drop"
+    ],
+    "notes": "Flaw: blocking table rewrite + destructive rename while old code runs."
+  },
+  "diagnostics": {
+    "hidden_flaw_keywords": [
+      "access exclusive|table rewrite|rewrites? the (whole|entire) table|lock",
+      "expand|contract|dual.?write|backfill"
+    ]
+  }
+}
