@@ -56,7 +56,7 @@ Then configure (below) and start it (an MCP client normally starts it for you):
 npm start
 ```
 
-The server speaks MCP over stdio; it logs only to stderr.
+The server speaks MCP over stdio; it logs only to stderr. In MCP client configs launch `node dist/src/server.js` directly, not `npm start` (npm prints a banner to stdout, which corrupts the protocol stream).
 
 ## Configuration (`.env`)
 
@@ -165,27 +165,36 @@ Input:
 }
 ```
 
-Output example (abridged from a benchmark run):
+Output example (real blind_first output for the `authz-cache-ttl` case, lists truncated with "…"):
 
 ```json
 {
   "verdict": "MODIFY",
-  "recommendation": "Keep the Redis cache-aside design, but subscribe to the existing 'permission.changed' Kafka event and delete the matching authz:{userId}:{docId}:* keys on every grant/revoke, keeping the TTL only as a backstop. Never fail open on cache errors.",
-  "critical_assumptions": ["That compliance accepts up to 15 minutes of post-revocation access"],
-  "material_risks": ["Revocation lag of up to 15 minutes for terminated employees: an auditable SOC 2 violation"],
-  "better_alternative": "Event-driven invalidation (or versioned keys) with a short TTL backstop.",
+  "recommendation": "Keep the read-through Redis cache direction but drop the 15-minute TTL with no invalidation: replace it with a 2-minute TTL plus a Kafka consumer on 'permission.changed' that deletes affected keys. Do not cache negative decisions (denials) for write/admin actions — either bypass the cache for non-read actions or use a much shorter TTL. This preserves the ~78% hit rate at 2 minutes while making revocation lag bounded and demonstrably SOC 2 compliant.",
+  "critical_assumptions": [
+    "SOC 2 permits up to 15 minutes of stale grants for terminated employees — 'promptly' is almost certainly stricter than this.",
+    "…"
+  ],
+  "material_risks": [
+    "15-minute stale grant for a terminated employee directly violates the SOC 2 revocation requirement — the most likely reason this gets rejected in audit or causes a real incident.",
+    "…"
+  ],
   "falsification_probe": {
-    "description": "In staging, revoke a user's access and immediately GET /documents/:id from all pods.",
-    "expected_signal": "403 within ~1 s on every pod; any 200 falsifies the design."
+    "description": "Ask the compliance/owning team for the documented maximum acceptable revocation delay for terminated employees (SOC 2 control text or internal policy), and simultaneously run a 1-day shadow test: apply cache with 15-min TTL but log and compare every cached decision against a live permissions-service.check result.",
+    "expected_signal": "If any stale-grant event exceeds the stated revocation SLA (likely <60s), the 15-min no-invalidation design is falsified; if the documented SLA is ≥15 minutes and zero stale-grant violations occur, KEEP becomes defensible."
   },
-  "confidence": 0.9,
+  "confidence": 0.85,
   "meta": {
-    "review_id": "4c1d…",
+    "review_id": "63218c5b…",
     "review_mode": "blind_first",
     "model": "xiaomi/mimo-v2.6-flash",
     "phases": 2,
-    "usage": { "prompt_tokens": 2950, "completion_tokens": 1486, "total_tokens": 4436 },
-    "latency_ms": 37931
+    "usage": {
+      "prompt_tokens": 2761,
+      "completion_tokens": 1781,
+      "total_tokens": 4542
+    },
+    "latency_ms": 33087
   }
 }
 ```
@@ -232,7 +241,14 @@ Runs every case in `proposal_first` and `blind_first` with the same model and th
 
 Cases live in `examples/cases/*.json`. Each has `input` (what the reviewer sees) plus human-only fields `hidden_flaw`, `hidden_flaw_keywords`, `notes`, `has_hidden_flaw` that are never sent to the reviewer. Included: per-user authz cache with TTL invalidation, 900M-row column retype under lock during a rolling deploy, public API `id` number→string change, check-then-act race "fixed" with an in-process mutex across 8 replicas, big-bang multi-service billing rewrite, RabbitMQ→Redis Pub/Sub swap, and one sound control case (concurrent index) to measure false alarms.
 
-A committed sample run is in [`benchmark-results/sample/`](benchmark-results/sample/).
+A committed sample run is in [`benchmark-results/sample/`](benchmark-results/sample/). First run (2026-10-04, `xiaomi/mimo-v2.6-flash` via OpenRouter, reasoning effort unset, 20k token budget, one run per mode, ~43k tokens total):
+
+| mode | flawed cases flagged (MODIFY/REPLACE) | REPLACE on flawed | sound control kept | avg tokens / review | avg latency |
+|---|---|---|---|---|---|
+| proposal_first | 6/6 | 3/6 | 0/1 (MODIFY) | ~1.7k | ~29 s |
+| blind_first | 6/6 | 4/6 | 1/1 (KEEP) | ~4.4k | ~34 s |
+
+Reading it honestly: n=7, single run, one lightweight model. Both modes caught every planted flaw (keyword heuristic hit rates 0.92 vs 0.88); blind_first was harsher on flawed proposals and did not raise a false alarm on the sound control, at ~2.6x the tokens. This is a smoke test, not evidence for the hypothesis; harder cases and repeated runs are needed.
 
 ## Development
 

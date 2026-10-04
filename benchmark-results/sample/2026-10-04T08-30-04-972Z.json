@@ -1,0 +1,904 @@
+{
+  "created_at": "2026-10-04T08:30:04.972Z",
+  "model": "xiaomi/mimo-v2.6-flash",
+  "base_url_host": "openrouter.ai",
+  "budget": {
+    "max_tokens_per_call": 4000,
+    "max_review_tokens": 20000,
+    "timeout_ms": 120000,
+    "reasoning_effort": null
+  },
+  "modes": [
+    "proposal_first",
+    "blind_first"
+  ],
+  "cases": [
+    {
+      "id": "authz-cache-ttl",
+      "title": "Caching per-user authorization decisions with TTL invalidation",
+      "has_hidden_flaw": true,
+      "hidden_flaw_keywords": [
+        "revoc|revok",
+        "stale|staleness",
+        "invalidat",
+        "offboard|remov|unshare|deprovision"
+      ],
+      "runs": {
+        "proposal_first": {
+          "outcome": {
+            "ok": true,
+            "result": {
+              "verdict": "MODIFY",
+              "recommendation": "Keep the Redis read-through cache, but (a) subscribe to the existing Kafka 'permission.changed' topic and delete/invalidate the affected key on every grant/revoke so revocation is near-immediate, and (b) replace blocking misses with stale-while-revalidate (serve the expired value and refresh in the background) so misses don't land in the request path. Cap TTL around 2-5 min for non-privileged reads with shorter TTL for admin/sensitive actions, and document the residual staleness bound for SOC 2.",
+              "critical_assumptions": [
+                "p95 of end-to-end latency can be met even though a 15% miss rate means p95 falls inside the miss population (misses take ~99ms baseline + ~180ms permissions call ≈ 280ms, not 40ms)",
+                "A 15-minute stale allow is compatible with SOC 2 'prompt' revocation for terminated employees and unshared documents (it is not, as stated)",
+                "The un-consumed 'permission.changed' topic will not be wired up, so no invalidation path exists at all",
+                "The boolean decision is a pure function of (userId, docId, action) with no per-request context (device, IP, time-of-day) that would make caching unsafe",
+                "The Redis cluster (shared with sessions) has headroom and an eviction policy that will not thrash permission keys under 2500 rps"
+              ],
+              "material_risks": [
+                "Compliance failure: a revoked document stays accessible for up to 15 minutes (worst case indefinitely while entries are re-cached); this is an audit finding, not a nit",
+                "The stated ~40ms p95 is arithmetically wrong: with 85% hit rate, 15% misses dominate p95 (~280ms), so the 120ms budget is still missed",
+                "Adding Redis as a synchronous hop on 100% of authz checks couples document availability to the session cluster; a Redis stall becomes a full outage",
+                "Cache key cardinality growth (user x doc x action) in a shared cluster risks evicting session keys or hitting memory limits",
+                "Warm-up after deploy/restart: all 12 pods cold-start simultaneously, causing a thundering herd of permissions calls at peak rps"
+              ],
+              "better_alternative": "Read-through cache with (1) Kafka-driven invalidation on 'permission.changed' (guarantees prompt revocation, zero changes to the permissions API), (2) stale-while-revalidate so misses never block the request path, (3) request coalescing/singleflight per key to prevent herd effects, and (4) short TTL (2 min per your log evidence: 78% hit) as a safety net only — correctness comes from invalidation, not TTL.",
+              "falsification_probe": {
+                "description": "Replay the same 24h log sample through a latency simulator: assign 99ms to non-permissions time and 180ms to each miss, compute the 95th percentile of the resulting per-request latency distribution under the proposed 15-min-TTL/85%-hit cache (rather than the average).",
+                "expected_signal": "If simulated p95 ≥ 120ms (expected ≈280ms because 15% > 5% of requests are misses), the proposal's '~40 ms' claim and the budget are falsified; only p95 < 120ms with blocking misses would confirm it."
+              },
+              "confidence": 0.88,
+              "meta": {
+                "review_id": "17124d81-6da6-421b-8c1d-4007b1d6155c",
+                "review_mode": "proposal_first",
+                "model": "xiaomi/mimo-v2.6-flash",
+                "phases": 1,
+                "usage": {
+                  "prompt_tokens": 783,
+                  "completion_tokens": 1820,
+                  "total_tokens": 2603
+                },
+                "latency_ms": 50009
+              }
+            }
+          },
+          "evaluation": {
+            "ok": true,
+            "verdict": "MODIFY",
+            "flagged": true,
+            "confidence": 0.88,
+            "total_tokens": 2603,
+            "latency_ms": 50009,
+            "keyword_groups_hit": [
+              "revoc|revok",
+              "stale|staleness",
+              "invalidat",
+              "offboard|remov|unshare|deprovision"
+            ],
+            "keyword_hit_ratio": 1
+          }
+        },
+        "blind_first": {
+          "outcome": {
+            "ok": true,
+            "result": {
+              "verdict": "MODIFY",
+              "recommendation": "Keep the read-through Redis cache direction but drop the 15-minute TTL with no invalidation: replace it with a 2-minute TTL plus a Kafka consumer on 'permission.changed' that deletes affected keys. Do not cache negative decisions (denials) for write/admin actions — either bypass the cache for non-read actions or use a much shorter TTL. This preserves the ~78% hit rate at 2 minutes while making revocation lag bounded and demonstrably SOC 2 compliant.",
+              "critical_assumptions": [
+                "SOC 2 permits up to 15 minutes of stale grants for terminated employees — 'promptly' is almost certainly stricter than this.",
+                "permission.changed events exist precisely so the cache can be invalidated; ignoring them wastes the intended mechanism and leaves no path to sub-second revocation.",
+                "check() is a pure function of (userId, docId, action) with no hidden context.",
+                "85% hit rate at 15 minutes translates to sufficient p95 benefit at whatever TTL compliance actually allows (2 min gives 78%, still ample).",
+                "Denials cached for 15 minutes won't block users whose permissions were just granted."
+              ],
+              "material_risks": [
+                "15-minute stale grant for a terminated employee directly violates the SOC 2 revocation requirement — the most likely reason this gets rejected in audit or causes a real incident.",
+                "Stale denial for 15 minutes after a new grant: user-facing 'access denied' errors and support load, invisible until volume spikes.",
+                "No invalidation path means any compliance tightening or incident requires a code change and redeploy across 12 pods under time pressure.",
+                "Assumption that 'no invalidation' equals simplicity masks real risk: the Kafka consumer is ~100 lines and is the difference between a compliant and non-compliant design.",
+                "Cache key on boolean decision without scoping for wildcard/group grants — if permissions-service supports group-level changes, (userId, docId) invalidation alone is insufficient (verify)."
+              ],
+              "falsification_probe": {
+                "description": "Ask the compliance/owning team for the documented maximum acceptable revocation delay for terminated employees (SOC 2 control text or internal policy), and simultaneously run a 1-day shadow test: apply cache with 15-min TTL but log and compare every cached decision against a live permissions-service.check result.",
+                "expected_signal": "If any stale-grant event exceeds the stated revocation SLA (likely <60s), the 15-min no-invalidation design is falsified; if the documented SLA is ≥15 minutes and zero stale-grant violations occur, KEEP becomes defensible."
+              },
+              "confidence": 0.85,
+              "meta": {
+                "review_id": "63218c5b-c31a-4e4e-854a-0aa5ae81b25c",
+                "review_mode": "blind_first",
+                "model": "xiaomi/mimo-v2.6-flash",
+                "phases": 2,
+                "usage": {
+                  "prompt_tokens": 2761,
+                  "completion_tokens": 1781,
+                  "total_tokens": 4542
+                },
+                "latency_ms": 33087
+              }
+            }
+          },
+          "evaluation": {
+            "ok": true,
+            "verdict": "MODIFY",
+            "flagged": true,
+            "confidence": 0.85,
+            "total_tokens": 4542,
+            "latency_ms": 33087,
+            "keyword_groups_hit": [
+              "revoc|revok",
+              "stale|staleness",
+              "invalidat"
+            ],
+            "keyword_hit_ratio": 0.75
+          }
+        }
+      }
+    },
+    {
+      "id": "orders-column-migration",
+      "title": "Renaming/retyping a column on a 900M-row table during a rolling deploy",
+      "has_hidden_flaw": true,
+      "hidden_flaw_keywords": [
+        "lock|access exclusive",
+        "rewrite|full table",
+        "rolling|old version|backward",
+        "expand|contract|dual.?write|backfill|batch"
+      ],
+      "runs": {
+        "proposal_first": {
+          "outcome": {
+            "ok": true,
+            "result": {
+              "verdict": "REPLACE",
+              "recommendation": "Do not run ALTER COLUMN TYPE on a 900M-row table: in PostgreSQL 15 it rewrites the whole table under an ACCESS EXCLUSIVE lock, blocking checkout traffic for far longer than any night window and breaching the S99.95% SLO. Use an expand–contract pattern instead: add a new amount_minor NUMERIC(19,4) column, backfill in small batches (e.g. 50k rows per statement with pauses), have the app dual-write both columns during the 25-minute rolling deploy, then flip reads, drop the old column in a later release.",
+              "critical_assumptions": [
+                "ALTER COLUMN TYPE on 900M rows finishes within statement_timeout/lock budget — it does not; statement_timeout doesn't even apply to the migration role",
+                "No lock_timeout/lock monitoring exists to detect blocked DDL during the pre-deploy job",
+                "The three reporting SQL jobs and the old app pods can tolerate the column rename mid-rollout (they cannot; old pods will fail on SELECT amount)",
+                "Night traffic is low enough that a multi-hour ACCESS EXCLUSIVE lock is acceptable — it is not, per the SLO",
+                "Old app versions during the ~25-minute roll still reference orders.amount after the rename"
+              ],
+              "material_risks": [
+                "Full table rewrite (~410GB+) holds ACCESS EXCLUSIVE lock on orders, stalling all checkouts and likely exceeding the release window",
+                "RENAME COLUMN in the same migration breaks old pods still serving traffic during the rolling deploy (AttributeError/UndefinedColumn), causing downtime",
+                "Pre-deploy job failure blocks the rollout; rollback is impossible because the rename already applied while old code expects amount",
+                "Long-running rewrite generates massive WAL and bloat, risking replica lag and disk pressure",
+                "Single-transaction 'safety' is false: it is atomic but not lock-free or time-bounded"
+              ],
+              "better_alternative": "Expand–contract: (1) migration adds amount_minor NUMERIC(19,4) as nullable with no table rewrite; (2) backfill job converts amount→amount_minor in batches with row locks and pauses, throttled under 1200 writes/s; (3) app dual-writes amount and amount_minor for one release, reads still from amount; (4) after replicas confirm, flip reads and set NOT NULL in a later release; (5) drop amount in a final cleanup release. Rename semantics are preserved by using db_column mapping or by reading/writing the new column from day one.",
+              "falsification_probe": {
+                "description": "In a staging PG15 instance or via EXPLAIN-free timing: run `BEGIN; SET lock_timeout='5s'; ALTER TABLE orders ALTER COLUMN amount TYPE NUMERIC(19,4); ROLLBACK;` while a concurrent `SELECT * FROM orders LIMIT 1` (as the app role) is issued from another session, or measure `pg_stat_activity` wait events on a restored 410GB sample table.",
+                "expected_signal": "If the ALTER waits on ACCESS EXCLUSIVE or takes > lock_timeout / minutes on ~900M rows, the proposal is falsified (expected). If it completes in seconds with no blocking, the proposal stands."
+              },
+              "confidence": 0.95,
+              "meta": {
+                "review_id": "6aa6e860-cd56-4864-b526-fdc04cb87dd7",
+                "review_mode": "proposal_first",
+                "model": "xiaomi/mimo-v2.6-flash",
+                "phases": 1,
+                "usage": {
+                  "prompt_tokens": 691,
+                  "completion_tokens": 966,
+                  "total_tokens": 1657
+                },
+                "latency_ms": 27651
+              }
+            }
+          },
+          "evaluation": {
+            "ok": true,
+            "verdict": "REPLACE",
+            "flagged": true,
+            "confidence": 0.95,
+            "total_tokens": 1657,
+            "latency_ms": 27651,
+            "keyword_groups_hit": [
+              "lock|access exclusive",
+              "rewrite|full table",
+              "rolling|old version|backward",
+              "expand|contract|dual.?write|backfill|batch"
+            ],
+            "keyword_hit_ratio": 1
+          }
+        },
+        "blind_first": {
+          "outcome": {
+            "ok": true,
+            "result": {
+              "verdict": "REPLACE",
+              "recommendation": "Reject the single-migration approach: an ALTER COLUMN TYPE on a 900M-row table performs a full table rewrite while holding ACCESS EXCLUSIVE, which will stall all 1,200 writes/s and blow the 99.95% SLO regardless of running at night. Replace it with a staged expand-contract: release 1 adds amount_minor NUMERIC(19,4), throttled batched backfill, and a dual-write trigger while keeping orders.amount; release 2 moves Django's db_column and the three reporting SQL queries to amount_minor; only after the rollback window closes does a later release drop orders.amount. Run each ALTER without a wrapping transaction, with lock_timeout and retry, so acquisition failure aborts cleanly instead of queuing behind the write path.",
+              "critical_assumptions": [
+                "The pre-deploy job has wall-clock budget large enough for a 410GB rewrite (it does not, by inspection).",
+                "One-transaction atomicity equals safety -- it ignores lock queue depth; the migration waits on and blocks behind active write transactions.",
+                "Night/low traffic means near-zero write concurrency at 1,200 w/s peak with rolling deploys (assumption, needs measurement).",
+                "Old app code tolerates the renamed column during the ~25 min coexistence and an in-window rollback.",
+                "INTEGER->NUMERIC(19,4) is a metadata-only change (it is not; PostgreSQL 15 requires a rewrite for this cast)."
+              ],
+              "material_risks": [
+                "Full table rewrite holds ACCESS EXCLUSIVE for minutes-hours, queueing behind and blocking all writes and reads on orders -> immediate SLO breach.",
+                "Replication lag spikes starve the three reporting jobs during the backfill/rewrite.",
+                "Rename lands inside the release, so rolling back the app makes old pods query orders.amount and error out, breaking in-window rollback.",
+                "The rewrite generates WAL proportional to 410GB, potentially filling disk and triggering failover.",
+                "Lock waiters behind the ALTER may hit 30s statement_timeout app-side, producing checkout errors even before the SLO window closes."
+              ],
+              "falsification_probe": {
+                "description": "On a restored copy of the 900M-row orders table, run in psql: BEGIN; LOCK TABLE orders IN ACCESS EXCLUSIVE MODE; ALTER TABLE orders ALTER COLUMN amount TYPE NUMERIC(19,4); -- measure, then ROLLBACK; time the statement and inspect pg_stat_progress_command / EXPLAIN output confirming 'Table scan' or full rewrite rather than 'metadata only'.",
+                "expected_signal": "Rewrite duration exceeding ~10-15s, or confirmation that the operation is not metadata-only, falsifies the proposal's 'safe one-transaction' claim; a sub-second result would support it."
+              },
+              "confidence": 0.9,
+              "meta": {
+                "review_id": "dd6909eb-814b-4a73-abc2-2edd8fe6f7ad",
+                "review_mode": "blind_first",
+                "model": "xiaomi/mimo-v2.6-flash",
+                "phases": 2,
+                "usage": {
+                  "prompt_tokens": 2557,
+                  "completion_tokens": 2298,
+                  "total_tokens": 4855
+                },
+                "latency_ms": 47736
+              }
+            }
+          },
+          "evaluation": {
+            "ok": true,
+            "verdict": "REPLACE",
+            "flagged": true,
+            "confidence": 0.9,
+            "total_tokens": 4855,
+            "latency_ms": 47736,
+            "keyword_groups_hit": [
+              "lock|access exclusive",
+              "rewrite|full table",
+              "rolling|old version|backward",
+              "expand|contract|dual.?write|backfill|batch"
+            ],
+            "keyword_hit_ratio": 1
+          }
+        }
+      }
+    },
+    {
+      "id": "api-id-type-change",
+      "title": "Changing a public API field from number to string",
+      "has_hidden_flaw": true,
+      "hidden_flaw_keywords": [
+        "break|breaking",
+        "old client|existing client|older app|backward|compat",
+        "version|v2|additive|new field|id_str",
+        "decod|deserializ|parse"
+      ],
+      "runs": {
+        "proposal_first": {
+          "outcome": {
+            "ok": true,
+            "result": {
+              "verdict": "MODIFY",
+              "recommendation": "Keep string IDs, but don't change `id` in-place in v1: it's an unannounced breaking change violating the 6-month partner notice and will hard-fail mobile clients older than 6 months (18% of traffic) via Codable/Moshi strict decoding. Introduce a non-breaking additive fix now (e.g. add `id_string` alongside `id`, and/or emit `id` as a JSON string only via content negotiation/`Accept` versioning or a new v2), deprecate the numeric field with a documented 6-month sunset, and fix the web frontend to read the string field immediately. Also fix the OpenAPI spec to declare the string type and add precision-loss tests covering 2^53.",
+              "critical_assumptions": [
+                "iOS Codable Int64 and Android Moshi Long cannot decode a JSON string (they will throw on type mismatch), so old clients hard-fail.",
+                "Partner SDKs generated with integer/int64 will reject string-typed ids, breaking deserialization for all ~40 integrations.",
+                "The 6-month notice policy applies to this change, so a same-week-release breaking change is non-compliant.",
+                "The Snowflake value itself is already correct server-side; only serialization/clients are wrong.",
+                "No API versioning/content-negotiation mechanism currently exists to scope the change."
+              ],
+              "material_risks": [
+                "Old mobile app versions (18% of traffic) crash or fail order fetches on decode, producing a mass outage for a subset of users.",
+                "All ~40 partner integrations break simultaneously at deploy, with no rollout window or rollback story beyond 6 days.",
+                "Policy/legal fallout: partners were contractually promised 6 months notice for breaking changes.",
+                "Changing `id` breaks clients that still parse it as a number, and server-side caching/CDN rules keyed on response shape may misbehave.",
+                "Web frontend and any other consumers that already parse `id` as number silently regress if not coordinated."
+              ],
+              "falsification_probe": {
+                "description": "Write a tiny iOS Codable struct `let id: Int64` and a Moshi Kotlin `data class O(val id: Long)`, feed each the proposed response JSON `{\"id\": \"1234567890123456789\"}`, and run decode; also regenerate the partner SDK from the modified OpenAPI (`type: string`) and attempt to parse the string id.",
+                "expected_signal": "If decoding fails/throws (expected for strict decoders) or the generated SDK rejects the value, the proposal is falsified as a drop-in change; if all clients accept strings without modification, the proposal holds."
+              },
+              "confidence": 0.85,
+              "meta": {
+                "review_id": "e6e3cf5b-8d10-4ba9-87be-d9d240a89595",
+                "review_mode": "proposal_first",
+                "model": "xiaomi/mimo-v2.6-flash",
+                "phases": 1,
+                "usage": {
+                  "prompt_tokens": 700,
+                  "completion_tokens": 609,
+                  "total_tokens": 1309
+                },
+                "latency_ms": 6798
+              }
+            }
+          },
+          "evaluation": {
+            "ok": true,
+            "verdict": "MODIFY",
+            "flagged": true,
+            "confidence": 0.85,
+            "total_tokens": 1309,
+            "latency_ms": 6798,
+            "keyword_groups_hit": [
+              "break|breaking",
+              "old client|existing client|older app|backward|compat",
+              "version|v2|additive|new field|id_str",
+              "decod|deserializ|parse"
+            ],
+            "keyword_hit_ratio": 1
+          }
+        },
+        "blind_first": {
+          "outcome": {
+            "ok": true,
+            "result": {
+              "verdict": "REPLACE",
+              "recommendation": "The proposal silently breaks the 18% of traffic on apps older than 6 months that parse `id` as Int64/Long from a JSON number — a strict decoder will throw on a string and no forced upgrade is allowed. Adopt an additive change instead: add a string field (e.g. `order_id` or `id_str`) in v1 alongside the deprecated numeric `id`, document the numeric field as lossy and scheduled for removal, and reserve string-only `id` for /v2 after the 6-month notice window. Keep the numeric field until metrics show it is unused.",
+              "critical_assumptions": [
+                "All shipped mobile builds decode `id` leniently and will not fail on a JSON string (they will not — Int64/Long in Codable/Moshi are strict)",
+                "Old app versions cannot be force-upgraded and will remain in the wild past the change date",
+                "A changelog entry plus a weekly ship date satisfies the promised 6-month notice for partners",
+                "Generated partner SDKs can absorb a wire-type change without a coordinated regeneration/rollout",
+                "No existing consumer compares or sorts `id` as a number in a way a string breaks"
+              ],
+              "material_risks": [
+                "Old iOS/Android builds throw decode errors on `id` as a string, breaking order screens for ~18% of traffic",
+                "Partner integrations on generated int64 SDKs fail deserialization en masse before regeneration lands",
+                "Change ships in ~1 week, violating the contractual 6-month notice and damaging partner trust",
+                "Crash/decode failures surface as blank order lists rather than clean errors, making rollback slow to detect",
+                "No compatibility window means a bug in rollout has no fallback path"
+              ],
+              "falsification_probe": {
+                "description": "Send GET /v1/orders/{id} with `id` serialized as a string to the staging environment running the current iOS and Android builds from 6 and 7 months ago (or replay their recorded decode path in a unit test) and observe the decode result for `let id: Int64` / `val id: Long`.",
+                "expected_signal": "If decoding succeeds and yields the correct value, the proposal's core risk disappears (KEEP plausible); if it throws or yields null/0, the proposal breaks shipped clients (REPLACE confirmed)."
+              },
+              "confidence": 0.9,
+              "meta": {
+                "review_id": "3370e604-1419-4703-aac6-fed17d1e9c08",
+                "review_mode": "blind_first",
+                "model": "xiaomi/mimo-v2.6-flash",
+                "phases": 2,
+                "usage": {
+                  "prompt_tokens": 2314,
+                  "completion_tokens": 1340,
+                  "total_tokens": 3654
+                },
+                "latency_ms": 27187
+              }
+            }
+          },
+          "evaluation": {
+            "ok": true,
+            "verdict": "REPLACE",
+            "flagged": true,
+            "confidence": 0.9,
+            "total_tokens": 3654,
+            "latency_ms": 27187,
+            "keyword_groups_hit": [
+              "break|breaking",
+              "old client|existing client|older app|backward|compat",
+              "version|v2|additive|new field|id_str",
+              "decod|deserializ|parse"
+            ],
+            "keyword_hit_ratio": 1
+          }
+        }
+      }
+    },
+    {
+      "id": "coupon-double-redeem",
+      "title": "Fixing double redemption of single-use coupons",
+      "has_hidden_flaw": true,
+      "hidden_flaw_keywords": [
+        "instance|replica|pod|process|horizontal",
+        "atomic|conditional update|compare.and.set|cas",
+        "unique|constraint|for update|row lock|transaction",
+        "distributed"
+      ],
+      "runs": {
+        "proposal_first": {
+          "outcome": {
+            "ok": true,
+            "result": {
+              "verdict": "REPLACE",
+              "recommendation": "An in-process mutex only serializes requests within a single pod; with 8 replicas behind a round-robin LB and 71% of duplicate redemptions landing on different pods, the proposed fix addresses the minority of cases and leaves the bug intact. Enforce redemption at the database instead: make the check-and-set atomic with a conditional update (`UPDATE coupon SET redeemedAt=now(), orderId=$1 WHERE code=$2 AND redeemedAt IS NULL`) and treat a 0-row result as 'already used', or add a partial unique index / unique constraint and catch the conflict. That single statement is serializable per-row by Postgres row locking, needs no new infrastructure, no schema change if you use the conditional update, and adds ~5 ms — well within the 800 ms p99 budget.",
+              "critical_assumptions": [
+                "Requests for the same code can be routed to different pods (stated: 8 replicas, round-robin, 71% cross-pod).",
+                "Postgres row-level locking on the UPDATE ... WHERE redeemedAt IS NULL path is available (standard in PG 14, no extra infra).",
+                "chargeOrder() is idempotent or safely revertible, since a lost race may still have charged before the redemption fails.",
+                "No other service or path writes to coupon.redeemedAt concurrently.",
+                "The retry-after-2s client behavior means the same code can be in flight on two pods simultaneously."
+              ],
+              "material_risks": [
+                "In-memory mutex leaks Map entries per unique code, a slow memory leak under traffic.",
+                "Mutex gives false confidence in code review/tests; unit test on one instance passes while production duplicates continue.",
+                "Charge-before-persist ordering means a losing request may still hit the payment gateway and require refund handling.",
+                "Race window between findUnique check and update remains if any non-conditional update path is left in place.",
+                "Map<code, Mutex> does not coordinate across replicas, so the 312/month duplicate rate is largely unaffected."
+              ],
+              "better_alternative": "Replace findUnique-then-update with a single atomic conditional update (`... WHERE code = ? AND redeemedAt IS NULL`); if rowCount === 0, throw Used. Combine with idempotency on chargeOrder (keyed by orderId/code) so retries are safe end-to-end. Optionally add a partial unique index as a schema-level backstop.",
+              "falsification_probe": {
+                "description": "In a staging environment, run two concurrent redeem requests for the same code but force them onto two different pods (e.g. `curl` twice with `--resolve` or hit two pod IPs directly), then repeat with both requests pinned to one pod. Assert only one returns success and count rows with non-null redeemedAt.",
+                "expected_signal": "If any cross-pod run yields two successes or two distinct orderId redemptions, the mutex proposal is falsified (expected: it fails cross-pod, passes single-pod). The conditional-update version must pass both."
+              },
+              "confidence": 0.95,
+              "meta": {
+                "review_id": "6fa4d408-2921-4284-b132-d092121e2caf",
+                "review_mode": "proposal_first",
+                "model": "xiaomi/mimo-v2.6-flash",
+                "phases": 1,
+                "usage": {
+                  "prompt_tokens": 770,
+                  "completion_tokens": 729,
+                  "total_tokens": 1499
+                },
+                "latency_ms": 14885
+              }
+            }
+          },
+          "evaluation": {
+            "ok": true,
+            "verdict": "REPLACE",
+            "flagged": true,
+            "confidence": 0.95,
+            "total_tokens": 1499,
+            "latency_ms": 14885,
+            "keyword_groups_hit": [
+              "instance|replica|pod|process|horizontal",
+              "atomic|conditional update|compare.and.set|cas",
+              "unique|constraint|for update|row lock|transaction"
+            ],
+            "keyword_hit_ratio": 0.75
+          }
+        },
+        "blind_first": {
+          "outcome": {
+            "ok": true,
+            "result": {
+              "verdict": "MODIFY",
+              "recommendation": "Keep the claim-before-charge ordering but replace the in-process mutex with a conditional DB write: `UPDATE coupon SET redeemedAt=now(), orderId=$1 WHERE code=$2 AND redeemedAt IS NULL` and treat 0 rows as Used; only then call chargeOrder, releasing the claim if the charge fails. Add a UNIQUE index on code as a backstop. The mutex must be dropped because it is per-process and the evidence shows 71% of duplicates hit different pods.",
+              "critical_assumptions": [
+                "The async-mutex Map is shared across all pods (it is not; it is per-process only)",
+                "Requests for the same coupon code land on the same replica (round-robin LB makes this false)",
+                "chargeOrder is idempotent or compensatable when the claim is rolled back",
+                "Postgres allows a conditional UPDATE + UNIQUE index on code without long locks or migration approval"
+              ],
+              "material_risks": [
+                "Mutex serialises only within one pod; retries and double-clicks that hash to another of the 8 replicas still race — this is exactly the 71% cross-pod case, so the fix would appear to work in unit tests while leaving most of the 312 duplicates unfixed.",
+                "Unbounded Map<code, Mutex> leaks entries and never cleans up, a slow memory leak in a long-lived pod.",
+                "No DB-level constraint as a backstop means any other code path (admin script, future endpoint) can still double-redeem.",
+                "If the mutex is held across the network charge, a slow charge plus 2s client retries can stack requests behind the lock and push p99 toward or past 800ms."
+              ],
+              "better_alternative": "A single conditional UPDATE (`WHERE code=? AND redeemedAt IS NULL`) executed before chargeOrder, wrapped so a failed charge releases the claim, plus a UNIQUE index on code. It is the same ~30-line scope, needs no new package, closes the cross-pod race the mutex cannot, and satisfies the no-new-infrastructure constraint.",
+              "falsification_probe": {
+                "description": "Unit/integration test that fires two concurrent redeem calls against two separate Node processes (or two K8s replicas) sharing the same Postgres, and assert only one returns success and redeemedAt is set exactly once.",
+                "expected_signal": "Both succeed (or either pod's second call succeeds) → the mutex-only proposal is falsified; exactly one success across processes → proposal holds."
+              },
+              "confidence": 0.9,
+              "meta": {
+                "review_id": "e608be80-8070-4e24-830c-3ee2171e8ebf",
+                "review_mode": "blind_first",
+                "model": "xiaomi/mimo-v2.6-flash",
+                "phases": 2,
+                "usage": {
+                  "prompt_tokens": 2448,
+                  "completion_tokens": 1545,
+                  "total_tokens": 3993
+                },
+                "latency_ms": 31026
+              }
+            }
+          },
+          "evaluation": {
+            "ok": true,
+            "verdict": "MODIFY",
+            "flagged": true,
+            "confidence": 0.9,
+            "total_tokens": 3993,
+            "latency_ms": 31026,
+            "keyword_groups_hit": [
+              "instance|replica|pod|process|horizontal",
+              "atomic|conditional update|compare.and.set|cas",
+              "unique|constraint|for update|row lock|transaction"
+            ],
+            "keyword_hit_ratio": 0.75
+          }
+        }
+      }
+    },
+    {
+      "id": "billing-big-bang-refactor",
+      "title": "Rewriting the billing module across five services in one PR",
+      "has_hidden_flaw": true,
+      "hidden_flaw_keywords": [
+        "incremental|strangler|step|phase",
+        "seam|interface|adapter|anti.corruption",
+        "characteri[sz]ation|golden|snapshot|parallel run|shadow",
+        "rollback|feature flag|toggle"
+      ],
+      "runs": {
+        "proposal_first": {
+          "outcome": {
+            "ok": true,
+            "result": {
+              "verdict": "MODIFY",
+              "recommendation": "Keep the clean `billing-core` domain model, but abandon the 3-month long-lived branch and single big-bang PR: instead land billing-core on main incrementally behind an interface/facade, migrating one plan cohort or billing concern (e.g., proration, then tax, then invoicing) per PR with dual-run/shadow comparison against the legacy path. Before writing the new model, invest first in characterization tests capturing the undocumented proration quirks and grandfathered-plan behavior — at 22% coverage those quirks will otherwise be silently lost. A 3-person team cannot safely hold 14k LOC of parallel changes on an isolated branch while feature work continues on main; the merge conflict surface alone is prohibitive.",
+              "critical_assumptions": [
+                "The 11 grandfathered plans' quirks can be enumerated and tested before the legacy code is deleted",
+                "Invoices produced by the new engine can be diffed against legacy output (dual-run) before customers see them",
+                "Feature work on main during the 3 months will not change billing interfaces in ways the isolated branch cannot absorb",
+                "The team can freeze or slow other billing-touching feature work during cutover",
+                "The new domain model can fully express all 37 plans without escaping back into service-specific logic"
+              ],
+              "material_risks": [
+                "Big-bang merge after 3 months of divergence from main: massive conflicts, no incremental review, and a single deploy that cannot be partially rolled back",
+                "Undocumented proration quirks customers rely on are lost because legacy code is deleted without characterization tests, producing real billing errors",
+                "One PR of this size (~14k LOC rewritten) is unreviewable; with 22% existing coverage, regressions reach finance's monthly reconciliation as monetary discrepancies",
+                "Long-lived branch bitrots; parallel feature work on main lands conflicting billing changes that surface only at merge time",
+                "Shadowing/dual-run is impossible at the moment of cutover, so correctness is verified only by production invoices"
+              ],
+              "falsification_probe": {
+                "description": "Build a differential test harness: take a sample of historical invoices (or replay rating events) for all 37 plans — especially the 11 grandfathered ones — and compute expected proration/tax totals from documented rules; run them against the current legacy implementation and record outputs as golden fixtures.",
+                "expected_signal": "If the legacy outputs cannot be reproduced from documented rules (cases with no explainable derivation), the quirks are undocumented and the rewrite must be driven by golden-output characterization tests against legacy code — falsifying the assumption that a clean model can be written from spec alone. If outputs are fully reproducible, the proposal's assumption holds."
+              },
+              "confidence": 0.86,
+              "meta": {
+                "review_id": "f3003449-bb17-467b-97da-f66a42010906",
+                "review_mode": "proposal_first",
+                "model": "xiaomi/mimo-v2.6-flash",
+                "phases": 1,
+                "usage": {
+                  "prompt_tokens": 666,
+                  "completion_tokens": 719,
+                  "total_tokens": 1385
+                },
+                "latency_ms": 22867
+              }
+            }
+          },
+          "evaluation": {
+            "ok": true,
+            "verdict": "MODIFY",
+            "flagged": true,
+            "confidence": 0.86,
+            "total_tokens": 1385,
+            "latency_ms": 22867,
+            "keyword_groups_hit": [
+              "incremental|strangler|step|phase",
+              "seam|interface|adapter|anti.corruption",
+              "characteri[sz]ation|golden|snapshot|parallel run|shadow"
+            ],
+            "keyword_hit_ratio": 0.75
+          }
+        },
+        "blind_first": {
+          "outcome": {
+            "ok": true,
+            "result": {
+              "verdict": "REPLACE",
+              "recommendation": "Abandon the 3-month long-lived branch big-bang. First mine historical invoices into a golden-invoice corpus and a diff tool, then extract a `billing-core` domain module incrementally behind per-plan flags with shadow comparison against legacy output. Keep legacy code authoritative per plan until parity is proven; migrate grandfathered plans last or never. Land each slice on main to avoid blocking the other two engineers.",
+              "critical_assumptions": [
+                "Legacy billing is deterministic enough to reproduce historical invoices for golden tests",
+                "The undocumented proration quirks can be inferred without asking customers or finance",
+                "One engineer can work three months without other feature work touching billing on main",
+                "Merging a ~3-month branch with 5 service call-site changes will not have severe conflicts",
+                "Unit tests written only for the new model are sufficient to guarantee invoice-level correctness"
+              ],
+              "material_risks": [
+                "Long-lived branch diverges from main for months; merge becomes a second project with conflict resolution in money-critical code",
+                "No golden invoice corpus means quirks get silently dropped; divergence surfaces at month-end finance reconciliation, not in unit tests",
+                "Big-bang cutover with no per-plan rollback turns the first divergence into a production billing incident",
+                "Parallel feature work on main either stalls or creates behavior the rewrite never sees",
+                "22% historical coverage means the new model is validated against a spec the team does not actually have"
+              ],
+              "better_alternative": "Same target architecture (pure `billing-core` domain model), but delivered as a strangler: build the golden-invoice harness first, then extract one bounded slice at a time (e.g., proration for one plan) with shadow diffs and per-plan flags, merging incrementally on main. This preserves the no-dual-maintenance goal where it matters (per-plan cutover, not whole-system) while removing the branch and correctness risks.",
+              "falsification_probe": {
+                "description": "Pick ~50 historical invoices spanning several plans (including at least one grandfathered and one with mid-cycle proration); re-run the legacy invoice generation from stored inputs and diff totals/line items against the stored invoice records.",
+                "expected_signal": "If regeneration reproduces stored invoices exactly, a golden-corpus harness is feasible and incremental extraction is testable — supporting REPLACE. If regeneration is nondeterministic or inputs are missing, neither the proposal's unit tests nor my harness can establish correctness, and the whole approach needs rethinking before any code is written."
+              },
+              "confidence": 0.82,
+              "meta": {
+                "review_id": "452699fe-a9c8-457c-935c-684c105f1443",
+                "review_mode": "blind_first",
+                "model": "xiaomi/mimo-v2.6-flash",
+                "phases": 2,
+                "usage": {
+                  "prompt_tokens": 2209,
+                  "completion_tokens": 1439,
+                  "total_tokens": 3648
+                },
+                "latency_ms": 15744
+              }
+            }
+          },
+          "evaluation": {
+            "ok": true,
+            "verdict": "REPLACE",
+            "flagged": true,
+            "confidence": 0.82,
+            "total_tokens": 3648,
+            "latency_ms": 15744,
+            "keyword_groups_hit": [
+              "incremental|strangler|step|phase",
+              "characteri[sz]ation|golden|snapshot|parallel run|shadow",
+              "rollback|feature flag|toggle"
+            ],
+            "keyword_hit_ratio": 0.75
+          }
+        }
+      }
+    },
+    {
+      "id": "concurrent-index-sound",
+      "title": "Adding an index concurrently for a slow query (control: sound proposal)",
+      "has_hidden_flaw": false,
+      "hidden_flaw_keywords": [],
+      "runs": {
+        "proposal_first": {
+          "outcome": {
+            "ok": true,
+            "result": {
+              "verdict": "MODIFY",
+              "recommendation": "The (account_id, created_at DESC) index direction is right, but harden the migration: set a bounded lock_timeout/statement_timeout around CREATE INDEX CONCURRENTLY, and after it completes verify pg_index.indisvalid = true (a failed CIC leaves an INVALID index that silently blocks retries until dropped). Consider a partial index `WHERE status <> 'void'` instead of post-filtering, since it shrinks the index and removes per-row recheck; at minimum confirm the <1% void claim holds for the 2M-row enterprise accounts. Before merging, gate on a simulated-plan benchmark (enable_seqscan=off EXPLAIN (ANALYZE, BUFFERS)) so you don't ship on planner guesswork.",
+              "critical_assumptions": [
+                "status <> 'void' excludes <1% of rows even for the 2M-row enterprise accounts (a recent-void-heavy account would make the top-20 scan degrade).",
+                "The migration runner actually applies disable_ddl_transaction for this migration; otherwise CIC fails immediately inside the implicit transaction block.",
+                "No long-running transaction or conflicting lock (autovacuum, DDL) will abort the multi-minute build on 60M rows at 150 writes/s.",
+                "Post-build planner will pick the index scan rather than keep the seq scan due to stale statistics on account_id.",
+                "p95 regression measurement before/after is available to confirm the fix."
+              ],
+              "material_risks": [
+                "CIC build on 60M rows can run many minutes while holding SHARE UPDATE EXCLUSIVE, blocking VACUUM/ANALYZE and DDL for that window — bloat and lock pile-up risk, though writes continue.",
+                "Failed or killed build leaves an INVALID index occupying disk and preventing future CIC attempts until explicitly dropped.",
+                "Post-filter approach can misfire on accounts whose recent rows are disproportionately 'void', causing index scan to read far past LIMIT 20.",
+                "Stale stats may leave the planner on the sequential scan, so the migration ships but p95 is unchanged."
+              ],
+              "better_alternative": "CREATE INDEX CONCURRENTLY idx_invoices_account_created ON invoices (account_id, created_at DESC) WHERE status <> 'void'; — a partial index both shrinks build time/size and lets the planner return the LIMIT 20 with no rechecks.",
+              "falsification_probe": {
+                "description": "On a replica or via a session running `SET enable_seqscan = off;` execute `EXPLAIN (ANALYZE, BUFFERS)` for the query against a large enterprise account_id, and separately run `SELECT count(*) FILTER (WHERE status='void')::float / count(*) FROM invoices WHERE account_id = <big_account>;`",
+                "expected_signal": "Index scan plan with ~20 rows returned, execution well under ~10ms, and void fraction <1% confirms the proposal; a scan of thousands of rows to yield 20, or a high void fraction for recent rows, falsifies the post-filter assumption."
+              },
+              "confidence": 0.72,
+              "meta": {
+                "review_id": "9745ad2e-098f-442f-9ce1-83c4abca15e3",
+                "review_mode": "proposal_first",
+                "model": "xiaomi/mimo-v2.6-flash",
+                "phases": 1,
+                "usage": {
+                  "prompt_tokens": 679,
+                  "completion_tokens": 1443,
+                  "total_tokens": 2122
+                },
+                "latency_ms": 50762
+              }
+            }
+          },
+          "evaluation": {
+            "ok": true,
+            "verdict": "MODIFY",
+            "flagged": true,
+            "confidence": 0.72,
+            "total_tokens": 2122,
+            "latency_ms": 50762,
+            "keyword_groups_hit": [],
+            "keyword_hit_ratio": null
+          }
+        },
+        "blind_first": {
+          "outcome": {
+            "ok": true,
+            "result": {
+              "verdict": "KEEP",
+              "recommendation": "The proposal matches my independent preferred solution: composite (account_id, created_at DESC) index built with CREATE INDEX CONCURRENTLY in a disable_ddl_transaction migration, with post-build EXPLAIN verification and INVALID-index cleanup. Keep it; optionally add a brief I/O/load watch during the build given 150 writes/s and 16 vCPU, but that is monitoring, not a change in approach.",
+              "critical_assumptions": [
+                "The migration tool truly skips transaction wrapping when disable_ddl_transaction is set, so CONCURRENTLY runs at top level",
+                "The planner will use the index for the ORDER BY ... LIMIT 20 without a merge/sort step (created_at ordering direction matches index direction)",
+                "status <> 'void' filters <1% of rows, making a post-filter cheap enough that a partial index is unnecessary",
+                "Enterprise accounts with 2M rows still satisfy p95 with an index scan feeding LIMIT 20, despite scanning many index entries",
+                "Build duration on 60M rows is acceptable and does not push lock waits past the 'few seconds' write constraint"
+              ],
+              "material_risks": [
+                "CONCURRENTLY failing mid-build (blocking reads on the session that started it, per PostgreSQL behavior) and leaving an INVALID index if the cleanup step is missed",
+                "Long build saturating I/O, elevating write latency for the ~150 writes/s workload beyond the allowed few seconds",
+                "If disable_ddl_transaction is not honored by the tool, the migration fails outright or, worse, runs CONCURRENTLY inside an implicit transaction and errors",
+                "Post-filter after index scan is fine at <1% void, but if void percentage is actually high the index degrades for void-heavy accounts"
+              ],
+              "falsification_probe": {
+                "description": "On a staging replica with a representative data volume, run: EXPLAIN (ANALYZE, BUFFERS) SELECT * FROM invoices WHERE account_id = <typical_id> AND status <> 'void' ORDER BY created_at DESC LIMIT 20; after building the same index, plus SELECT relname, indisvalid FROM pg_index JOIN pg_class USING (id) WHERE relname = 'idx_invoices_account_created';",
+                "expected_signal": "Confirm: 'Index Scan using idx_invoices_account_created' with execution well under 100ms and no Sort node; indisvalid = true. Falsify: a Sort node remains, a bitmap/seq scan is chosen, or execution stays in the hundreds of ms for the 2M-row enterprise account."
+              },
+              "confidence": 0.86,
+              "meta": {
+                "review_id": "a001d6c0-6e1d-42b4-a3b5-eea375393ca0",
+                "review_mode": "blind_first",
+                "model": "xiaomi/mimo-v2.6-flash",
+                "phases": 2,
+                "usage": {
+                  "prompt_tokens": 2264,
+                  "completion_tokens": 1640,
+                  "total_tokens": 3904
+                },
+                "latency_ms": 46226
+              }
+            }
+          },
+          "evaluation": {
+            "ok": true,
+            "verdict": "KEEP",
+            "flagged": false,
+            "confidence": 0.86,
+            "total_tokens": 3904,
+            "latency_ms": 46226,
+            "keyword_groups_hit": [],
+            "keyword_hit_ratio": null
+          }
+        }
+      }
+    },
+    {
+      "id": "queue-swap-redis-streams",
+      "title": "Replacing RabbitMQ with Redis Pub/Sub for job dispatch",
+      "has_hidden_flaw": true,
+      "hidden_flaw_keywords": [
+        "lost|loss|drop",
+        "ack|acknowledg",
+        "durab|persist|at.least.once|delivery guarantee",
+        "stream|consumer group|xreadgroup"
+      ],
+      "runs": {
+        "proposal_first": {
+          "outcome": {
+            "ok": true,
+            "result": {
+              "verdict": "REPLACE",
+              "recommendation": "Redis Pub/Sub is fire-and-forget: it does not persist messages, has no acknowledgement, and silently drops messages to any subscriber that is not connected at publish time. This directly violates the at-least-once requirement for payment webhooks, especially during the several-per-day worker redeploys. Use Redis as a broker with real delivery semantics instead (e.g., Celery with Redis broker using reliable single/single-beat delivery, or Redis Streams with consumer groups, PEL, XACK, XAUTOCLAIM and a dead-letter stream), and keep RabbitMQ until the new path proves equivalent delivery under deploy churn.",
+              "critical_assumptions": [
+                "AOF persistence makes Pub/Sub messages durable (false: AOF only records commands actually applied; Pub/Sub messages are not stored in the keyspace and are never replayed)",
+                "Subscribers are connected at the moment of publish (redeploys guarantee windows where they are not)",
+                "A Pub/Sub fan-out preserves exactly-once-ish semantics; there is no ack, retry, or DLQ equivalent",
+                "Peak ~300 jobs/s is achievable with consumer-group lag/backpressure on Streams (assumption, untested)",
+                "Removing RabbitMQ is possible within the one-week migration window without a dual-write/shadow period"
+              ],
+              "material_risks": [
+                "Lost payment webhook jobs: customer charged, order not fulfilled — unrecoverable, no redelivery path",
+                "Every worker redeploy silently drops in-flight and concurrently published jobs across all 20 job types",
+                "No ack/retry/DLQ: the existing 5-retry DLQ behavior disappears, so poison messages either loop or vanish",
+                "No replay/backlog: workers cannot catch up after downtime; Pub/Sub has no retention",
+                "Early RabbitMQ removal eliminates rollback if Redis-based delivery underperforms"
+              ],
+              "better_alternative": "Redis Streams with consumer groups (XADD/XREADGROUP/XACK/XAUTOCLAIM, PEL-based redelivery, MAXLEN/min-id trim policy, and a dead-letter stream), or Celery with a Redis broker configured for reliable delivery — both run on the Redis already deployed while providing persistence, acks, retries and backlog that Pub/Sub lacks.",
+              "falsification_probe": {
+                "description": "Single-process test: XADD/PUBLISH a payment-webhook job, kill/restart the consumer (simulating a redeploy) so it is disconnected at publish time, then check whether the job is ever processed. For Pub/Sub: python -c with redis-py, publish while no subscriber is listening, then subscribe and observe whether the message arrives.",
+                "expected_signal": "If the message is never delivered after the subscriber reconnects (expected for Pub/Sub), the proposal is falsified. If delivery occurs after reconnect with an ack record, the durability claim holds."
+              },
+              "confidence": 0.97,
+              "meta": {
+                "review_id": "804e2db6-b20c-4d7e-a675-3db0d5671cd2",
+                "review_mode": "proposal_first",
+                "model": "xiaomi/mimo-v2.6-flash",
+                "phases": 1,
+                "usage": {
+                  "prompt_tokens": 613,
+                  "completion_tokens": 658,
+                  "total_tokens": 1271
+                },
+                "latency_ms": 31392
+              }
+            }
+          },
+          "evaluation": {
+            "ok": true,
+            "verdict": "REPLACE",
+            "flagged": true,
+            "confidence": 0.97,
+            "total_tokens": 1271,
+            "latency_ms": 31392,
+            "keyword_groups_hit": [
+              "lost|loss|drop",
+              "ack|acknowledg",
+              "durab|persist|at.least.once|delivery guarantee",
+              "stream|consumer group|xreadgroup"
+            ],
+            "keyword_hit_ratio": 1
+          }
+        },
+        "blind_first": {
+          "outcome": {
+            "ok": true,
+            "result": {
+              "verdict": "REPLACE",
+              "recommendation": "Redis Pub/Sub is fire-and-forget: it has no persistence, no acks, no redelivery, and no consumer groups, so a single worker redeploy or brief network blip silently drops jobs — directly violating the at-least-once constraint for payment webhooks. AOF persistence does not apply to Pub/Sub at all; the publish is not written to the AOF and there is no backlog for a late-joining or restarting subscriber. Replace with Redis Streams using consumer groups (XADD/XREADGROUP/XACK/XAUTOCLAIM) plus a retry/DLQ stream, after first hardening AOF fsync and enforcing idempotency on payment handlers.",
+              "critical_assumptions": [
+                "That AOF persistence makes Pub/Sub messages durable — it does not; Pub/Sub is transient by design",
+                "That a subscriber reconnecting after redeploy will receive messages published while it was down",
+                "That workers can tolerate losing jobs when no subscriber is connected at publish time",
+                "That Redis durability config (fsync=always or replica) is adequate once it becomes the payment-durability boundary",
+                "That handlers are idempotent under at-least-once redelivery"
+              ],
+              "material_risks": [
+                "Payment webhook jobs published during a worker redeploy window are lost — customer charged, order not fulfilled, violating the stated hard constraint",
+                "No ack/redelivery means a worker crash mid-processing loses the job entirely",
+                "No DLQ or retry: a failing handler has nowhere to park the message; the 5-retry semantics silently disappear",
+                "If no subscriber is connected, PUBLISH is a no-op and jobs vanish with no error",
+                "At 300 jobs/s Pub/Sub is fast, but subscribers that can't keep up have messages dropped, not buffered"
+              ],
+              "better_alternative": "Redis Streams with consumer groups: XADD for durable append, XREADGROUP/XACK for at-least-once with explicit acknowledgment, XAUTOCLAIM to reclaim messages from dead consumers after redeploys, and a separate retry stream with attempt counters plus a DLQ stream to preserve the 5-retry semantics. This keeps the 'drop RabbitMQ, use Redis we already run' direction while actually meeting the durability constraint.",
+              "falsification_probe": {
+                "description": "From redis-cli, publish a message to a channel with NO subscribed client, then restart a subscriber and check whether it receives the message: `redis-cli PUBLISH jobs:test '{\"id\":1}'` (no subscribers), then start a client with `redis-cli SUBSCRIBE jobs:test` and observe whether '{\"id\":1}' arrives. Also inspect the AOF/RDB files for the payload.",
+                "expected_signal": "Message does not arrive and payload is absent from AOF/RDB — proves Pub/Sub is transient and the durability claim is false. If somehow delivered and persisted, the proposal's core claim would hold."
+              },
+              "confidence": 0.95,
+              "meta": {
+                "review_id": "1b171fd2-1d9f-4e80-8caf-01df9fe4c9a9",
+                "review_mode": "blind_first",
+                "model": "xiaomi/mimo-v2.6-flash",
+                "phases": 2,
+                "usage": {
+                  "prompt_tokens": 3654,
+                  "completion_tokens": 2854,
+                  "total_tokens": 6508
+                },
+                "latency_ms": 39984
+              }
+            }
+          },
+          "evaluation": {
+            "ok": true,
+            "verdict": "REPLACE",
+            "flagged": true,
+            "confidence": 0.95,
+            "total_tokens": 6508,
+            "latency_ms": 39984,
+            "keyword_groups_hit": [
+              "lost|loss|drop",
+              "ack|acknowledg",
+              "durab|persist|at.least.once|delivery guarantee",
+              "stream|consumer group|xreadgroup"
+            ],
+            "keyword_hit_ratio": 1
+          }
+        }
+      }
+    }
+  ],
+  "summary": [
+    {
+      "mode": "proposal_first",
+      "runs": 7,
+      "errors": 0,
+      "verdicts": {
+        "KEEP": 0,
+        "MODIFY": 4,
+        "REPLACE": 3,
+        "INSUFFICIENT_EVIDENCE": 0
+      },
+      "avg_confidence": 0.883,
+      "avg_total_tokens": 1692.286,
+      "total_tokens": 11846,
+      "avg_latency_ms": 29194.857,
+      "flawed_cases": 6,
+      "flawed_flagged": 6,
+      "avg_keyword_hit_ratio_flawed": 0.917,
+      "sound_cases": 1,
+      "sound_kept": 0
+    },
+    {
+      "mode": "blind_first",
+      "runs": 7,
+      "errors": 0,
+      "verdicts": {
+        "KEEP": 1,
+        "MODIFY": 2,
+        "REPLACE": 4,
+        "INSUFFICIENT_EVIDENCE": 0
+      },
+      "avg_confidence": 0.883,
+      "avg_total_tokens": 4443.429,
+      "total_tokens": 31104,
+      "avg_latency_ms": 34427.143,
+      "flawed_cases": 6,
+      "flawed_flagged": 6,
+      "avg_keyword_hit_ratio_flawed": 0.875,
+      "sound_cases": 1,
+      "sound_kept": 1
+    }
+  ]
+}
