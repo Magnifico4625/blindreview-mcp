@@ -4,7 +4,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { changedLinesOf, extractDiff, isRepoCorrect, isTestableDefect, isUntestableDefect, loadRepoCases, toBaselineInput, toRepoView, type RepoCase } from "../benchmark/evidence/cases.js";
 import { CostMeter, SpendLedger } from "../benchmark/evidence/cost.js";
-import { criterionLabel, projectVerdict } from "../benchmark/evidence/criteria.js";
+import { criterionLabel, followupVerdict, projectVerdict } from "../benchmark/evidence/criteria.js";
 import { computeRepoMetrics } from "../benchmark/evidence/metrics.js";
 import { repoMarkdown } from "../benchmark/evidence/report.js";
 import { BudgetStop, runRepoBenchmark, type RepoRunRecord } from "../benchmark/evidence/runner.js";
@@ -284,6 +284,15 @@ describe("runner, budget and metrics", () => {
     expect(projectVerdict(["continue", "continue"])).toBe("continue");
     expect(projectVerdict(["continue", "archive"])).toBe("inconclusive");
     expect(projectVerdict(["archive", "archive"])).toBe("archive");
+  });
+
+  it("pre-registered follow-up criterion labels", () => {
+    expect(followupVerdict(wilson(1, 20), wilson(10, 20), 0, 0)).toBe("alive");
+    expect(followupVerdict(wilson(8, 20), wilson(10, 20), 0, 0)).toBe("archive");
+    expect(followupVerdict(wilson(5, 20), wilson(10, 20), 0, 0)).toBe("inconclusive");
+    expect(followupVerdict(wilson(0, 20), wilson(5, 20), 0, 0)).toBe("inconclusive (set not tempting)");
+    expect(followupVerdict(wilson(0, 20), wilson(6, 20), 0, 0)).toBe("alive");
+    expect(followupVerdict(wilson(0, 20), wilson(10, 20), 0, 0.15)).toBe("inconclusive (failures)");
   });
 });
 

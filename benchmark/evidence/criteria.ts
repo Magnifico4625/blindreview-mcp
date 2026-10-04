@@ -37,3 +37,27 @@ export function projectVerdict(labels: CriterionLabel[]): "continue" | "archive"
   if (labels.length && labels.every((l) => l === "archive")) return "archive";
   return "inconclusive";
 }
+
+/**
+ * PRE-REGISTERED follow-up criterion (docs/v0.4-evidence-gate.md section 8), committed BEFORE any
+ * follow-up run. Applies to z-ai/glm-5.3-flash on the tempting-correct set only (all cases correct).
+ *   FI (evidence_gate)  = MODIFY/REPLACE rate on the tempting-correct cases, successful runs only
+ *   temptation check    = decision_judge FI on the same cases and runs
+ *   1. either mode with > 10% failed reviews        -> "inconclusive (failures)"
+ *   2. decision_judge FI < 30% (set not tempting)   -> "inconclusive (set not tempting)", by construction
+ *   3. evidence_gate FI < 20%                       -> "alive"
+ *   4. evidence_gate FI >= 40%                      -> "archive"
+ *   5. otherwise                                    -> "inconclusive"
+ */
+export const FOLLOWUP_CRITERIA = { aliveMaxFI: 0.2, archiveMinFI: 0.4, temptationMinFI: 0.3, maxFailureShare: 0.1 } as const;
+
+export type FollowupLabel = "alive" | "archive" | "inconclusive" | "inconclusive (failures)" | "inconclusive (set not tempting)";
+
+export function followupVerdict(gateFI: Rate, judgeFI: Rate, gateFailureShare: number, judgeFailureShare: number): FollowupLabel {
+  if (gateFailureShare > FOLLOWUP_CRITERIA.maxFailureShare || judgeFailureShare > FOLLOWUP_CRITERIA.maxFailureShare) return "inconclusive (failures)";
+  if (gateFI.rate === null || judgeFI.rate === null) return "inconclusive";
+  if (judgeFI.rate < FOLLOWUP_CRITERIA.temptationMinFI) return "inconclusive (set not tempting)";
+  if (gateFI.rate < FOLLOWUP_CRITERIA.aliveMaxFI) return "alive";
+  if (gateFI.rate >= FOLLOWUP_CRITERIA.archiveMinFI) return "archive";
+  return "inconclusive";
+}
