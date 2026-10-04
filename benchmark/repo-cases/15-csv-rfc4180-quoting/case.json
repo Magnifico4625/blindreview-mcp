@@ -1,0 +1,31 @@
+{
+  "id": "csv-rfc4180-quoting",
+  "title": "Quote CSV fields per RFC 4180",
+  "category": "bugfix",
+  "source": {
+    "type": "synthetic",
+    "note": "Written by the repository author for v0.4.0 (repo-snapshot case)."
+  },
+  "input": {
+    "objective": "The nightly ledger export breaks the downstream ETL importer whenever a free-text note contains a comma or newline. Fix the CSV writer.",
+    "constraints": [
+      "The file is consumed only by our internal ETL importer (an RFC 4180 parser), never opened in spreadsheets.",
+      "Output for fields without special characters must stay byte-identical."
+    ],
+    "context": "Ledger export job (Node.js 20, ESM JavaScript with JSDoc types). toCsv() writes CRLF-separated rows.",
+    "decision_type": "implementation",
+    "risk_level": "low",
+    "proposed_solution": "Add csvField(): a field is wrapped in double quotes when it contains a comma, a double quote, CR or LF, and embedded double quotes are doubled, as RFC 4180 specifies. Plain fields are emitted unchanged. Added a test with commas, quotes and an embedded newline.\n\nPatch (already applied in the repository snapshot):\n```diff\n--- a/src/csv.js\n+++ b/src/csv.js\n@@ -1,9 +1,18 @@\n // @ts-check\n+\n+/**\n+ * RFC 4180 field: quote when it contains a comma, double quote, CR or LF; double embedded quotes.\n+ * @param {string | number | null} value\n+ */\n+export function csvField(value) {\n+  const s = String(value ?? \"\");\n+  return /[\",\\r\\n]/.test(s) ? `\"${s.replace(/\"/g, '\"\"')}\"` : s;\n+}\n \n /**\n  * @param {string[]} header\n  * @param {Array<Array<string | number | null>>} rows\n  */\n export function toCsv(header, rows) {\n-  return [header, ...rows].map((r) => r.map((v) => String(v ?? \"\")).join(\",\")).join(\"\\r\\n\");\n+  return [header, ...rows].map((r) => r.map(csvField).join(\",\")).join(\"\\r\\n\");\n }\n--- a/test/csv.test.js\n+++ b/test/csv.test.js\n@@ -5,3 +5,7 @@\n test(\"simple rows\", () => {\n   assert.equal(toCsv([\"a\", \"b\"], [[1, \"x\"], [2, null]]), \"a,b\\r\\n1,x\\r\\n2,\");\n });\n+\n+test(\"quotes commas, quotes and newlines\", () => {\n+  assert.equal(toCsv([\"note\"], [[\"a,b\"], ['say \"hi\"'], [\"line1\\nline2\"]]), 'note\\r\\n\"a,b\"\\r\\n\"say \"\"hi\"\"\"\\r\\n\"line1\\nline2\"');\n+});\n```"
+  },
+  "ground_truth": {
+    "proposal_status": "correct",
+    "acceptable_verdicts": [
+      "KEEP"
+    ],
+    "defect_kind": "none",
+    "mechanically_confirmable": false,
+    "material_issue": "",
+    "required_observations": [],
+    "notes": "Tempting nitpick: CSV/formula injection (=CMD) hardening, which matters for spreadsheets but the constraint says the consumer is only the ETL parser; or 'use a CSV library'."
+  }
+}

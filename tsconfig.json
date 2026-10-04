@@ -19,5 +19,6 @@
     "outDir": "dist",
     "newLine": "lf"
   },
-  "include": ["src/**/*.ts", "benchmark/**/*.ts", "tests/**/*.ts", "vitest.config.ts"]
+  "include": ["src/**/*.ts", "benchmark/**/*.ts", "tests/**/*.ts", "vitest.config.ts"],
+  "exclude": ["benchmark/repo-cases/**"]
 }

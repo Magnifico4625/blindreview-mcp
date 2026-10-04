@@ -1,0 +1,35 @@
+{
+  "id": "slugify-diacritics",
+  "title": "Strip diacritics in article slugs",
+  "category": "string-handling",
+  "source": {
+    "type": "synthetic",
+    "note": "Written by the repository author for v0.4.0 (repo-snapshot case)."
+  },
+  "input": {
+    "objective": "Article titles with accented characters (e.g. \"Crème brûlée\") currently produce slugs like \"cr-me-br-l-e\". Make slugify transliterate accented Latin letters to ASCII.",
+    "constraints": [
+      "Existing article URLs are shared publicly and must not change for plain-ASCII titles.",
+      "No new runtime dependencies."
+    ],
+    "context": "Small blog engine (Node.js 20, ESM, JavaScript with JSDoc types checked by tsc). slugify() is used to build public article URLs.",
+    "decision_type": "implementation",
+    "risk_level": "medium",
+    "proposed_solution": "Normalize the title with NFKD and strip combining diacritical marks (U+0300–U+036F) before the existing ASCII filter, so \"Crème brûlée\" becomes \"creme-brulee\". While there, I simplified the chain: the final trimming replace is redundant because the character-class replace already collapses separators into a single dash. Output for plain-ASCII titles is unchanged.\n\nPatch (already applied in the repository snapshot):\n```diff\n--- a/src/slug.js\n+++ b/src/slug.js\n@@ -7,7 +7,8 @@\n  */\n export function slugify(title) {\n   return title\n+    .normalize(\"NFKD\")\n+    .replace(/[\\u0300-\\u036f]/g, \"\")\n     .toLowerCase()\n-    .replace(/[^a-z0-9]+/g, \"-\")\n-    .replace(/^-+|-+$/g, \"\");\n+    .replace(/[^a-z0-9]+/g, \"-\");\n }\n```"
+  },
+  "ground_truth": {
+    "proposal_status": "materially_flawed",
+    "acceptable_verdicts": [
+      "MODIFY",
+      "REPLACE"
+    ],
+    "defect_kind": "test",
+    "mechanically_confirmable": true,
+    "material_issue": "Removing the trim step keeps leading/trailing dashes (\"  Hello, World!  \" -> \"-hello-world-\"), which changes existing public URLs for ASCII titles that start or end with punctuation/space. The existing test 'trims separators at both ends' fails.",
+    "required_observations": [
+      "Leading/trailing dashes are no longer trimmed",
+      "Existing test test/slug.test.js fails / ASCII URLs change"
+    ],
+    "notes": ""
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "id": "retry-jitter",
+  "title": "Add full jitter to the retry helper",
+  "category": "reliability",
+  "source": {
+    "type": "synthetic",
+    "note": "Written by the repository author for v0.4.0 (repo-snapshot case)."
+  },
+  "input": {
+    "objective": "During a payment-provider brownout all our workers retried in lockstep (synchronized exponential backoff) and made the outage worse. Add jitter to the shared retry helper.",
+    "constraints": [
+      "The payment provider allows at most 3 attempts per charge; exceeding it gets the merchant account throttled.",
+      "Keep the retry() signature backward compatible."
+    ],
+    "context": "Payments service (Node.js 20, ESM JavaScript with JSDoc types). retry() is used by chargeWithRetry() and a few other callers.",
+    "decision_type": "implementation",
+    "risk_level": "high",
+    "proposed_solution": "Switch the backoff to \"full jitter\" (AWS architecture blog): the delay before the next attempt is random in [0, base * 2^attempt]. I added an optional `random` hook for tests and renamed the loop variable to `attempt` for readability. The number of attempts is unchanged.\n\nPatch (already applied in the repository snapshot):\n```diff\n--- a/src/retry.js\n+++ b/src/retry.js\n@@ -1,22 +1,24 @@\n // @ts-check\n \n /**\n- * Call fn until it succeeds, at most `attempts` times in total, with exponential backoff.\n+ * Call fn until it succeeds, at most `attempts` times in total, with exponential backoff\n+ * and full jitter (delay is uniformly random in [0, base * 2^attempt]).\n  * @template T\n  * @param {() => Promise<T>} fn\n- * @param {{ attempts: number, baseDelayMs: number, sleep?: (ms: number) => Promise<void> }} opts\n+ * @param {{ attempts: number, baseDelayMs: number, sleep?: (ms: number) => Promise<void>, random?: () => number }} opts\n  * @returns {Promise<T>}\n  */\n export async function retry(fn, opts) {\n   const sleep = opts.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));\n+  const random = opts.random ?? Math.random;\n   /** @type {unknown} */\n   let lastError;\n-  for (let i = 0; i < opts.attempts; i++) {\n+  for (let attempt = 0; attempt <= opts.attempts; attempt++) {\n     try {\n       return await fn();\n     } catch (err) {\n       lastError = err;\n-      if (i < opts.attempts - 1) await sleep(opts.baseDelayMs * 2 ** i);\n+      if (attempt < opts.attempts) await sleep(Math.round(random() * opts.baseDelayMs * 2 ** attempt));\n     }\n   }\n   throw lastError;\n```"
+  },
+  "ground_truth": {
+    "proposal_status": "materially_flawed",
+    "acceptable_verdicts": [
+      "MODIFY",
+      "REPLACE"
+    ],
+    "defect_kind": "test",
+    "mechanically_confirmable": true,
+    "material_issue": "The loop now runs from 0 to attempts inclusive, i.e. attempts + 1 calls (4 charges attempts instead of 3), violating the provider limit. Existing test 'makes exactly `attempts` calls when every call fails' fails.",
+    "required_observations": [
+      "Loop makes attempts+1 calls (off-by-one)",
+      "Violates the 3-attempt provider limit / existing test fails"
+    ],
+    "notes": ""
+  }
+}

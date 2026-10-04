@@ -1,0 +1,35 @@
+{
+  "id": "config-field-rename",
+  "title": "Rename config.timeoutMs to requestTimeoutMs",
+  "category": "refactor",
+  "source": {
+    "type": "synthetic",
+    "note": "Written by the repository author for v0.4.0 (repo-snapshot case)."
+  },
+  "input": {
+    "objective": "We are about to add a connect timeout. Rename the ambiguous config field `timeoutMs` to `requestTimeoutMs` first so the two cannot be confused.",
+    "constraints": [
+      "Environment variable names must not change.",
+      "Pure rename, no behavior change."
+    ],
+    "context": "Sync client (Node.js 20, ESM JavaScript with JSDoc types checked by `tsc --noEmit`). Config is loaded once in src/config.js and passed around.",
+    "decision_type": "refactor",
+    "risk_level": "low",
+    "proposed_solution": "Rename the field in the Config typedef and loadConfig(), and update every reader of it (src/http.js) plus the two unit tests. Env var API_TIMEOUT_MS is unchanged. Pure rename, no behavior change.\n\nPatch (already applied in the repository snapshot):\n```diff\n--- a/src/config.js\n+++ b/src/config.js\n@@ -1,6 +1,6 @@\n // @ts-check\n \n-/** @typedef {{ baseUrl: string, timeoutMs: number, retries: number }} Config */\n+/** @typedef {{ baseUrl: string, requestTimeoutMs: number, retries: number }} Config */\n \n /**\n  * @param {Record<string, string | undefined>} env\n@@ -9,7 +9,7 @@\n export function loadConfig(env) {\n   return {\n     baseUrl: env.API_BASE_URL ?? \"http://localhost:8080\",\n-    timeoutMs: Number(env.API_TIMEOUT_MS ?? 5000),\n+    requestTimeoutMs: Number(env.API_TIMEOUT_MS ?? 5000),\n     retries: Number(env.API_RETRIES ?? 2),\n   };\n }\n--- a/src/http.js\n+++ b/src/http.js\n@@ -5,5 +5,5 @@\n  * @param {string} path\n  */\n export function requestOptions(config, path) {\n-  return { url: `${config.baseUrl}${path}`, timeout: config.timeoutMs, retries: config.retries };\n+  return { url: `${config.baseUrl}${path}`, timeout: config.requestTimeoutMs, retries: config.retries };\n }\n--- a/test/config.test.js\n+++ b/test/config.test.js\n@@ -5,5 +5,5 @@\n test(\"defaults\", () => {\n   const c = loadConfig({});\n   assert.equal(c.baseUrl, \"http://localhost:8080\");\n-  assert.equal(c.timeoutMs, 5000);\n+  assert.equal(c.requestTimeoutMs, 5000);\n });\n--- a/test/http.test.js\n+++ b/test/http.test.js\n@@ -3,6 +3,6 @@\n import { requestOptions } from \"../src/http.js\";\n \n test(\"request options\", () => {\n-  const o = requestOptions({ baseUrl: \"http://x\", timeoutMs: 100, retries: 1 }, \"/a\");\n+  const o = requestOptions({ baseUrl: \"http://x\", requestTimeoutMs: 100, retries: 1 }, \"/a\");\n   assert.deepEqual(o, { url: \"http://x/a\", timeout: 100, retries: 1 });\n });\n```"
+  },
+  "ground_truth": {
+    "proposal_status": "materially_flawed",
+    "acceptable_verdicts": [
+      "MODIFY",
+      "REPLACE"
+    ],
+    "defect_kind": "typecheck",
+    "mechanically_confirmable": true,
+    "material_issue": "src/worker.js still reads config.timeoutMs, which is now undefined: the deadline becomes NaN and jobs never expire. tsc flags the missing property; tests do not cover worker.js.",
+    "required_observations": [
+      "worker.js still reads config.timeoutMs",
+      "Jobs never expire (NaN deadline) / typecheck fails"
+    ],
+    "notes": ""
+  }
+}

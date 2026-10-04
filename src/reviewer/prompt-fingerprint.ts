@@ -3,6 +3,7 @@ import type { ChatMessage } from "../providers/provider.js";
 import type { ReviewInput } from "../schemas/review.js";
 import { toBlindInput } from "../schemas/review.js";
 import * as P from "./prompts.js";
+import { BUDGET_EXHAUSTED_MESSAGE, buildEvidenceGateMessages, EVIDENCE_TOOLS, type RepoTaskView } from "../evidence/prompts.js";
 
 /**
  * Prompt fingerprints: every prompt builder is rendered with a fixed placeholder input and hashed.
@@ -18,6 +19,17 @@ export const FIXTURE_INPUT: ReviewInput = {
   risk_level: "medium",
   environment: "{{environment}}",
   evidence: ["{{evidence_1}}"],
+};
+export const FIXTURE_REPO_VIEW: RepoTaskView = {
+  objective: "{{objective}}",
+  constraints: ["{{constraint_1}}", "{{constraint_2}}"],
+  context: "{{context}}",
+  environment: "{{environment}}",
+  files: ["{{file_1}}", "{{file_2}}"],
+  tests: ["{{test_1}}"],
+  proposed_solution: "{{proposed_solution}}",
+  decision_type: "other",
+  risk_level: "medium",
 };
 const FIXTURE_ASSISTANT: ChatMessage = { role: "assistant", content: "{{previous_answer}}" };
 
@@ -41,6 +53,12 @@ export function promptTemplates(): Record<string, ChatMessage[]> {
       ...P.buildIndependentComparerMessages("{{position_json}}", FIXTURE_INPUT.proposed_solution),
     ],
     decision_judge: P.buildDecisionJudgeMessages(FIXTURE_INPUT),
+    // added in v0.4.0: prompt + tool definitions + budget message (tool cap rendered as 8)
+    evidence_gate: [
+      ...buildEvidenceGateMessages(FIXTURE_REPO_VIEW, 8),
+      { role: "system", content: JSON.stringify(EVIDENCE_TOOLS) },
+      { role: "user", content: BUDGET_EXHAUSTED_MESSAGE },
+    ],
   };
 }
 

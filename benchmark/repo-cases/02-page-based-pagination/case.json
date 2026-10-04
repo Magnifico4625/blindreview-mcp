@@ -1,0 +1,35 @@
+{
+  "id": "page-based-pagination",
+  "title": "Add 1-based page/per_page parameters to the products API",
+  "category": "api",
+  "source": {
+    "type": "synthetic",
+    "note": "Written by the repository author for v0.4.0 (repo-snapshot case)."
+  },
+  "input": {
+    "objective": "Mobile clients want page-based pagination (?page=&per_page=) for GET /products. Legacy clients use ?offset=&limit= and must keep working.",
+    "constraints": [
+      "Responses for requests without pagination parameters must not change.",
+      "Legacy offset/limit parameters keep their meaning."
+    ],
+    "context": "Product listing API (Node.js 20, ESM JavaScript with JSDoc types). listProducts() maps query parameters onto a generic paginate(items, offset, limit) helper.",
+    "decision_type": "api",
+    "risk_level": "medium",
+    "proposed_solution": "Accept `page` (1-based) and `per_page` alongside the legacy parameters. If `offset` is given we use it as before; otherwise the offset is derived from the page number, with `page` defaulting to 1 so that default responses stay unchanged. `per_page` falls back to `limit` and goes through the existing clampLimit().\n\nPatch (already applied in the repository snapshot):\n```diff\n--- a/src/api.js\n+++ b/src/api.js\n@@ -2,12 +2,13 @@\n import { clampLimit, paginate } from \"./paginate.js\";\n \n /**\n- * GET /products?offset=&limit=\n+ * GET /products?page=&per_page=   (legacy: ?offset=&limit=)\n+ * `page` is 1-based.\n  * @param {Array<{ id: number, name: string }>} products\n  * @param {Record<string, string | undefined>} query\n  */\n export function listProducts(products, query) {\n-  const limit = clampLimit(query.limit);\n-  const offset = Number(query.offset ?? 0);\n-  return paginate(products, offset, limit);\n+  const perPage = clampLimit(query.per_page ?? query.limit);\n+  const offset = query.offset !== undefined ? Number(query.offset) : Number(query.page ?? 1) * perPage;\n+  return paginate(products, offset, perPage);\n }\n```"
+  },
+  "ground_truth": {
+    "proposal_status": "materially_flawed",
+    "acceptable_verdicts": [
+      "MODIFY",
+      "REPLACE"
+    ],
+    "defect_kind": "test",
+    "mechanically_confirmable": true,
+    "material_issue": "Offset is computed as page * perPage instead of (page - 1) * perPage: page 1 (and the default request) skips the first 20 products. Existing test 'returns the first 20 products by default' fails.",
+    "required_observations": [
+      "Off-by-one: offset must be (page-1)*per_page",
+      "Default request now skips the first page / existing test fails"
+    ],
+    "notes": ""
+  }
+}

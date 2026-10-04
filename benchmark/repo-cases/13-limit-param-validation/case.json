@@ -1,0 +1,31 @@
+{
+  "id": "limit-param-validation",
+  "title": "Validate and cap the ?limit= query parameter",
+  "category": "api",
+  "source": {
+    "type": "synthetic",
+    "note": "Written by the repository author for v0.4.0 (repo-snapshot case)."
+  },
+  "input": {
+    "objective": "A client sent ?limit=100000 and the catalog endpoint returned 100k rows, timing out the database. Validate and cap the limit parameter.",
+    "constraints": [
+      "Valid existing requests (limit 1..100) must behave exactly as before.",
+      "Invalid values must not produce an error response (clients rely on the default)."
+    ],
+    "context": "Catalog API (Node.js 20, ESM JavaScript with JSDoc types). parseLimit() is used by all list endpoints; documented maximum is 100.",
+    "decision_type": "implementation",
+    "risk_level": "low",
+    "proposed_solution": "Accept only plain base-10 integers; values below 1 or non-numeric input fall back to the default 20; values above 100 are clamped to 100 (the documented maximum). Exposed DEFAULT_LIMIT and MAX_LIMIT constants. Added tests for capping, garbage, negatives, zero, \"12abc\", \"1e3\" and leading zeros.\n\nPatch (already applied in the repository snapshot):\n```diff\n--- a/src/query.js\n+++ b/src/query.js\n@@ -1,10 +1,16 @@\n // @ts-check\n \n+export const DEFAULT_LIMIT = 20;\n+export const MAX_LIMIT = 100;\n+\n /**\n- * Parse the ?limit= query parameter.\n+ * Parse the ?limit= query parameter: base-10 integer in [1, MAX_LIMIT]; anything else → DEFAULT_LIMIT.\n  * @param {string | undefined} raw\n  * @returns {number}\n  */\n export function parseLimit(raw) {\n-  return parseInt(raw ?? \"\") || 20;\n+  if (raw === undefined || !/^\\s*\\d+\\s*$/.test(raw)) return DEFAULT_LIMIT;\n+  const n = Number.parseInt(raw, 10);\n+  if (n < 1) return DEFAULT_LIMIT;\n+  return Math.min(n, MAX_LIMIT);\n }\n--- a/test/query.test.js\n+++ b/test/query.test.js\n@@ -4,3 +4,8 @@\n \n test(\"parses numbers\", () => assert.equal(parseLimit(\"50\"), 50));\n test(\"defaults when missing\", () => assert.equal(parseLimit(undefined), 20));\n+test(\"caps at 100\", () => assert.equal(parseLimit(\"100000\"), 100));\n+test(\"rejects garbage, negatives and zero\", () => {\n+  for (const raw of [\"abc\", \"-5\", \"0\", \"12abc\", \"1e3\", \"\"]) assert.equal(parseLimit(raw), 20, raw);\n+});\n+test(\"base 10 even with leading zeros\", () => assert.equal(parseLimit(\"010\"), 10));\n```"
+  },
+  "ground_truth": {
+    "proposal_status": "correct",
+    "acceptable_verdicts": [
+      "KEEP"
+    ],
+    "defect_kind": "none",
+    "mechanically_confirmable": false,
+    "material_issue": "",
+    "required_observations": [],
+    "notes": "Tempting nitpick: suggesting a schema validation library, returning HTTP 400 instead of the default (excluded by the constraint), or making the max configurable."
+  }
+}

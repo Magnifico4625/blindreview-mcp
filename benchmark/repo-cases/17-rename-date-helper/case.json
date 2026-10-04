@@ -1,0 +1,31 @@
+{
+  "id": "rename-date-helper",
+  "title": "Rename fmtDate to formatIsoDate",
+  "category": "refactor",
+  "source": {
+    "type": "synthetic",
+    "note": "Written by the repository author for v0.4.0 (repo-snapshot case)."
+  },
+  "input": {
+    "objective": "fmtDate is ambiguous next to the new locale-aware formatter. Rename the internal helper to formatIsoDate.",
+    "constraints": [
+      "Internal module, not part of any published package.",
+      "No behaviour change."
+    ],
+    "context": "Billing service (Node.js 20, ESM JavaScript with JSDoc types checked by tsc). The helper lives in src/dates.js.",
+    "decision_type": "refactor",
+    "risk_level": "low",
+    "proposed_solution": "Rename fmtDate to formatIsoDate in src/dates.js and update its three callers (src/reports.js, src/invoices.js, src/audit/log.js) and the test. No behaviour change.\n\nPatch (already applied in the repository snapshot):\n```diff\n--- a/src/audit/log.js\n+++ b/src/audit/log.js\n@@ -1,7 +1,7 @@\n // @ts-check\n-import { fmtDate } from \"../dates.js\";\n+import { formatIsoDate } from \"../dates.js\";\n \n /** @param {{ user: string, action: string, at: Date }} e */\n export function auditLine(e) {\n-  return `${fmtDate(e.at)} ${e.user} ${e.action}`;\n+  return `${formatIsoDate(e.at)} ${e.user} ${e.action}`;\n }\n--- a/src/dates.js\n+++ b/src/dates.js\n@@ -4,6 +4,6 @@\n  * @param {Date} d\n  * @returns {string} YYYY-MM-DD (UTC)\n  */\n-export function fmtDate(d) {\n+export function formatIsoDate(d) {\n   return d.toISOString().slice(0, 10);\n }\n--- a/src/invoices.js\n+++ b/src/invoices.js\n@@ -1,7 +1,7 @@\n // @ts-check\n-import { fmtDate } from \"./dates.js\";\n+import { formatIsoDate } from \"./dates.js\";\n \n /** @param {{ number: string, issued: Date, due: Date }} i */\n export function invoiceDates(i) {\n-  return { issued: fmtDate(i.issued), due: fmtDate(i.due) };\n+  return { issued: formatIsoDate(i.issued), due: formatIsoDate(i.due) };\n }\n--- a/src/reports.js\n+++ b/src/reports.js\n@@ -1,7 +1,7 @@\n // @ts-check\n-import { fmtDate } from \"./dates.js\";\n+import { formatIsoDate } from \"./dates.js\";\n \n /** @param {{ title: string, at: Date }} r */\n export function reportHeader(r) {\n-  return `${r.title} — ${fmtDate(r.at)}`;\n+  return `${r.title} — ${formatIsoDate(r.at)}`;\n }\n--- a/test/dates.test.js\n+++ b/test/dates.test.js\n@@ -1,9 +1,9 @@\n import { test } from \"node:test\";\n import assert from \"node:assert/strict\";\n-import { fmtDate } from \"../src/dates.js\";\n+import { formatIsoDate } from \"../src/dates.js\";\n import { invoiceDates } from \"../src/invoices.js\";\n \n-test(\"formats as UTC date\", () => assert.equal(fmtDate(new Date(\"2026-03-05T23:30:00Z\")), \"2026-03-05\"));\n+test(\"formats as UTC date\", () => assert.equal(formatIsoDate(new Date(\"2026-03-05T23:30:00Z\")), \"2026-03-05\"));\n test(\"invoice dates\", () => {\n   assert.deepEqual(invoiceDates({ number: \"1\", issued: new Date(\"2026-01-01T00:00:00Z\"), due: new Date(\"2026-01-31T00:00:00Z\") }), { issued: \"2026-01-01\", due: \"2026-01-31\" });\n });\n```"
+  },
+  "ground_truth": {
+    "proposal_status": "correct",
+    "acceptable_verdicts": [
+      "KEEP"
+    ],
+    "defect_kind": "none",
+    "mechanically_confirmable": false,
+    "material_issue": "",
+    "required_observations": [],
+    "notes": "Tempting nitpick: claiming a caller was probably missed or that a deprecated alias should be kept (internal module; all callers updated)."
+  }
+}

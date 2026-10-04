@@ -1,0 +1,30 @@
+{
+  "id": "debounce-clear-timer",
+  "title": "Fix debounce firing once per call",
+  "category": "bugfix",
+  "source": {
+    "type": "synthetic",
+    "note": "Written by the repository author for v0.4.0 (repo-snapshot case)."
+  },
+  "input": {
+    "objective": "The search box sends one backend query per keystroke although it is debounced. Fix the debounce helper.",
+    "constraints": [
+      "Keep the debounce() signature (the injectable timers are used by tests)."
+    ],
+    "context": "Front-end utility module (ESM JavaScript with JSDoc types checked by tsc, tests run in Node 20). debounce() is used by the search input with a 250 ms wait.",
+    "decision_type": "debugging",
+    "risk_level": "low",
+    "proposed_solution": "debounce() never cancelled the previously scheduled call, so every call fired. Keep the pending timer handle, clear it on each new call and reset it when the timer fires. Added a burst test (three calls → one invocation with the last arguments).\n\nPatch (already applied in the repository snapshot):\n```diff\n--- a/src/debounce.js\n+++ b/src/debounce.js\n@@ -9,8 +9,15 @@\n  */\n export function debounce(fn, waitMs, timers = {}) {\n   const setTimer = timers.setTimer ?? ((cb, ms) => setTimeout(cb, ms));\n+  const clearTimer = timers.clearTimer ?? ((h) => clearTimeout(/** @type {ReturnType<typeof setTimeout>} */ (h)));\n+  /** @type {unknown} */\n+  let pending;\n   /** @param {A} args */\n   return (...args) => {\n-    setTimer(() => fn(...args), waitMs);\n+    if (pending !== undefined) clearTimer(pending);\n+    pending = setTimer(() => {\n+      pending = undefined;\n+      fn(...args);\n+    }, waitMs);\n   };\n }\n--- a/test/debounce.test.js\n+++ b/test/debounce.test.js\n@@ -20,3 +20,14 @@\n   t.flush();\n   assert.deepEqual(calls, [1]);\n });\n+\n+test(\"only the last call in a burst fires\", () => {\n+  const t = fakeTimers();\n+  const calls = [];\n+  const d = debounce((x) => calls.push(x), 100, t);\n+  d(1);\n+  d(2);\n+  d(3);\n+  t.flush();\n+  assert.deepEqual(calls, [3]);\n+});\n```"
+  },
+  "ground_truth": {
+    "proposal_status": "correct",
+    "acceptable_verdicts": [
+      "KEEP"
+    ],
+    "defect_kind": "none",
+    "mechanically_confirmable": false,
+    "material_issue": "",
+    "required_observations": [],
+    "notes": "Tempting nitpick: asking for leading-edge/maxWait/cancel() options or a library (lodash.debounce). The fix is complete for the stated bug."
+  }
+}

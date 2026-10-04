@@ -1,0 +1,35 @@
+{
+  "id": "in-memory-rate-limit",
+  "title": "Replace the Redis-backed rate limiter with in-process counters",
+  "category": "architecture",
+  "source": {
+    "type": "synthetic",
+    "note": "Written by the repository author for v0.4.0 (repo-snapshot case)."
+  },
+  "input": {
+    "objective": "Rate limiting adds a Redis round trip (~2 ms p50, 15 ms p99) to every partner API request. Remove that latency.",
+    "constraints": [
+      "Each partner API key is contractually limited to 100 requests/minute because our upstream data vendor bills us per request above that.",
+      "No new infrastructure this quarter."
+    ],
+    "context": "Partner gateway (Node.js 20, ESM JavaScript). Runs as 12 replicas behind a round-robin load balancer with no session affinity. A Redis cluster is currently used only by the rate limiter.",
+    "decision_type": "architecture",
+    "risk_level": "high",
+    "proposed_solution": "Replace the Redis INCR/EXPIRE counter with an in-process Map that is reset at each window boundary. Same fixed-window semantics, no network hop, and we can decommission the Redis cluster. Tests updated, plus a test for key independence.\n\nPatch (already applied in the repository snapshot):\n```diff\n--- a/src/ratelimit.js\n+++ b/src/ratelimit.js\n@@ -1,20 +1,23 @@\n // @ts-check\n \n /**\n- * @typedef {{ incr(key: string, ttlSeconds: number): Promise<number> }} CounterStore\n- */\n-\n-/**\n- * Fixed-window rate limiter backed by a shared counter store (Redis INCR + EXPIRE).\n- * @param {CounterStore} store\n+ * Fixed-window rate limiter with in-process counters (no network round trip).\n  * @param {{ limit: number, windowSeconds: number, now?: () => number }} opts\n  */\n-export function createRateLimiter(store, opts) {\n+export function createRateLimiter(opts) {\n   const now = opts.now ?? Date.now;\n+  /** @type {Map<string, number>} */\n+  const counters = new Map();\n+  let currentWindow = -1;\n   /** @param {string} apiKey */\n   return async function allow(apiKey) {\n     const window = Math.floor(now() / 1000 / opts.windowSeconds);\n-    const count = await store.incr(`rl:${apiKey}:${window}`, opts.windowSeconds);\n+    if (window !== currentWindow) {\n+      counters.clear();\n+      currentWindow = window;\n+    }\n+    const count = (counters.get(apiKey) ?? 0) + 1;\n+    counters.set(apiKey, count);\n     return count <= opts.limit;\n   };\n }\n--- a/test/ratelimit.test.js\n+++ b/test/ratelimit.test.js\n@@ -2,17 +2,18 @@\n import assert from \"node:assert/strict\";\n import { createRateLimiter } from \"../src/ratelimit.js\";\n \n-function memoryStore() {\n-  const m = new Map();\n-  return { incr: async (k) => { m.set(k, (m.get(k) ?? 0) + 1); return m.get(k); } };\n-}\n-\n test(\"allows up to the limit per window\", async () => {\n   let t = 0;\n-  const allow = createRateLimiter(memoryStore(), { limit: 2, windowSeconds: 60, now: () => t });\n+  const allow = createRateLimiter({ limit: 2, windowSeconds: 60, now: () => t });\n   assert.equal(await allow(\"k\"), true);\n   assert.equal(await allow(\"k\"), true);\n   assert.equal(await allow(\"k\"), false);\n   t = 61_000;\n   assert.equal(await allow(\"k\"), true);\n });\n+\n+test(\"keys are independent\", async () => {\n+  const allow = createRateLimiter({ limit: 1, windowSeconds: 60, now: () => 0 });\n+  assert.equal(await allow(\"a\"), true);\n+  assert.equal(await allow(\"b\"), true);\n+});\n```"
+  },
+  "ground_truth": {
+    "proposal_status": "materially_flawed",
+    "acceptable_verdicts": [
+      "MODIFY",
+      "REPLACE"
+    ],
+    "defect_kind": "untestable",
+    "mechanically_confirmable": false,
+    "material_issue": "Per-process counters on 12 round-robin replicas let each key make up to ~12x the limit (1,200/min), which the vendor bills. The limit must stay in a shared store (or be enforced at the load balancer). Not demonstrable with tests, typecheck or repo search.",
+    "required_observations": [
+      "Counters are per replica: effective limit ~12x with 12 replicas",
+      "Keep a shared store or enforce at the gateway/LB"
+    ],
+    "notes": ""
+  }
+}

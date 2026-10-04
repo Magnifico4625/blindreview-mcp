@@ -1,0 +1,35 @@
+{
+  "id": "live-dashboard-aggregation",
+  "title": "Compute merchant dashboard statistics live per request",
+  "category": "performance",
+  "source": {
+    "type": "synthetic",
+    "note": "Written by the repository author for v0.4.0 (repo-snapshot case)."
+  },
+  "input": {
+    "objective": "Merchants complain that dashboard numbers can be up to 24 h stale because daily_stats is computed by a nightly job. Make the dashboard fresher.",
+    "constraints": [
+      "Dashboard p95 latency budget is 200 ms.",
+      "The primary Postgres is already at ~70% CPU at peak."
+    ],
+    "context": "Merchant dashboard API (Node.js 20, ESM JavaScript). The dashboard endpoint gets ~400 requests/s at peak (it auto-refreshes every 30 s in open browser tabs). Large merchants have up to 2 million orders; db.ordersForUser() runs `SELECT total_cents, created_at FROM orders WHERE merchant_id = $1` against the primary and returns every row.",
+    "decision_type": "performance",
+    "risk_level": "high",
+    "proposed_solution": "Stop reading the nightly daily_stats row and compute the numbers live on every request from the merchant's orders (count + sum). This removes the staleness completely and lets us delete the nightly job later. The function stays pure and is unit-tested with a fake db.\n\nPatch (already applied in the repository snapshot):\n```diff\n--- a/src/dashboard.js\n+++ b/src/dashboard.js\n@@ -6,11 +6,13 @@\n  */\n \n /**\n- * GET /dashboard. Reads the precomputed daily_stats row written by the nightly job.\n+ * GET /dashboard. Computes the statistics live from the user's orders so they are always fresh.\n  * @param {Db} db\n  * @param {string} userId\n+ * @param {() => Date} [now]\n  */\n-export function getDashboard(db, userId) {\n-  const s = db.dailyStats(userId);\n-  return s ?? { orders: 0, revenueCents: 0, updatedAt: null };\n+export function getDashboard(db, userId, now = () => new Date()) {\n+  const orders = db.ordersForUser(userId);\n+  const revenueCents = orders.reduce((sum, o) => sum + o.totalCents, 0);\n+  return { orders: orders.length, revenueCents, updatedAt: now().toISOString() };\n }\n--- a/test/dashboard.test.js\n+++ b/test/dashboard.test.js\n@@ -3,12 +3,11 @@\n import { getDashboard } from \"../src/dashboard.js\";\n \n const db = {\n-  dailyStats: (id) => (id === \"u1\" ? { orders: 2, revenueCents: 700, updatedAt: \"2026-01-01T00:00:00.000Z\" } : undefined),\n+  dailyStats: () => undefined,\n   ordersForUser: () => [{ totalCents: 300, createdAt: \"x\" }, { totalCents: 400, createdAt: \"y\" }],\n };\n \n-test(\"returns stats for a user\", () => {\n-  const d = getDashboard(db, \"u1\");\n-  assert.equal(d.orders, 2);\n-  assert.equal(d.revenueCents, 700);\n+test(\"computes stats live from orders\", () => {\n+  const d = getDashboard(db, \"u1\", () => new Date(\"2026-01-01T00:00:00.000Z\"));\n+  assert.deepEqual(d, { orders: 2, revenueCents: 700, updatedAt: \"2026-01-01T00:00:00.000Z\" });\n });\n```"
+  },
+  "ground_truth": {
+    "proposal_status": "materially_flawed",
+    "acceptable_verdicts": [
+      "MODIFY",
+      "REPLACE"
+    ],
+    "defect_kind": "untestable",
+    "mechanically_confirmable": false,
+    "material_issue": "Full scan of up to 2M order rows on the primary for every dashboard request at ~400 rps (auto-refresh) blows the 200 ms budget and overloads an already busy primary. Use incremental aggregates / short-TTL cache / replica + materialized view. Nothing in the snapshot (tests, typecheck, search) can demonstrate it.",
+    "required_observations": [
+      "Per-request full scan of up to 2M rows at ~400 rps",
+      "Use incremental/materialized aggregates or caching"
+    ],
+    "notes": ""
+  }
+}

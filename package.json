@@ -45,7 +45,11 @@
     "benchmark:compare": "node dist/benchmark/compare.js",
     "benchmark:ingest": "node dist/benchmark/ingest.js",
     "prebenchmark:compare": "npm run build",
-    "prebenchmark:ingest": "npm run build"
+    "prebenchmark:ingest": "npm run build",
+    "benchmark:evidence": "node dist/benchmark/evidence/cli.js",
+    "prebenchmark:evidence": "npm run build",
+    "benchmark:evidence-summary": "node dist/benchmark/evidence/summary.js",
+    "prebenchmark:evidence-summary": "npm run build"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.0",

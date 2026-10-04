@@ -1,0 +1,35 @@
+{
+  "id": "refund-ledger-status",
+  "title": "Move refunds into a ledger and drop the 'refunded' order status",
+  "category": "data-model",
+  "source": {
+    "type": "synthetic",
+    "note": "Written by the repository author for v0.4.0 (repo-snapshot case)."
+  },
+  "input": {
+    "objective": "Finance needs partial refunds and an audit trail, which a single order status cannot express. Record refunds as ledger entries instead of flipping the order status.",
+    "constraints": [
+      "An order must never be refunded (paid out) twice.",
+      "Keep refundOrder() as the single entry point."
+    ],
+    "context": "Order service (Node.js 20, ESM JavaScript with JSDoc types checked by `tsc --noEmit`). Orders and refunds live in src/orders.js and src/refunds.js.",
+    "decision_type": "database",
+    "risk_level": "high",
+    "proposed_solution": "Introduce a RefundEntry ledger. refundOrder() pays out and appends a ledger entry via recordRefund(); the 'refunded' value is removed from OrderStatus because the status no longer changes on refund. The existing guards in refundOrder() are kept as they were, and the tests are updated for the new signature.\n\nPatch (already applied in the repository snapshot):\n```diff\n--- a/src/orders.js\n+++ b/src/orders.js\n@@ -1,12 +1,18 @@\n // @ts-check\n \n-/** @typedef {\"pending\" | \"paid\" | \"shipped\" | \"refunded\"} OrderStatus */\n+/** @typedef {\"pending\" | \"paid\" | \"shipped\"} OrderStatus */\n /** @typedef {{ id: string, status: OrderStatus, totalCents: number }} Order */\n+/** @typedef {{ orderId: string, amountCents: number, at: number }} RefundEntry */\n \n /**\n+ * Refunds are recorded in the refund ledger; the order status no longer changes.\n  * @param {Order} order\n- * @returns {Order}\n+ * @param {RefundEntry[]} ledger\n+ * @param {number} now\n+ * @returns {RefundEntry}\n  */\n-export function markRefunded(order) {\n-  return { ...order, status: \"refunded\" };\n+export function recordRefund(order, ledger, now) {\n+  const entry = { orderId: order.id, amountCents: order.totalCents, at: now };\n+  ledger.push(entry);\n+  return entry;\n }\n--- a/src/refunds.js\n+++ b/src/refunds.js\n@@ -1,14 +1,16 @@\n // @ts-check\n-import { markRefunded } from \"./orders.js\";\n+import { recordRefund } from \"./orders.js\";\n \n /**\n  * Refund an order. Must never refund the same order twice.\n  * @param {import(\"./orders.js\").Order} order\n  * @param {(orderId: string, cents: number) => void} payout\n+ * @param {import(\"./orders.js\").RefundEntry[]} ledger\n+ * @param {number} now\n  */\n-export function refundOrder(order, payout) {\n+export function refundOrder(order, payout, ledger, now) {\n   if (order.status === \"refunded\") throw new Error(`order ${order.id} already refunded`);\n   if (order.status === \"pending\") throw new Error(`order ${order.id} was never paid`);\n   payout(order.id, order.totalCents);\n-  return markRefunded(order);\n+  return recordRefund(order, ledger, now);\n }\n--- a/test/refunds.test.js\n+++ b/test/refunds.test.js\n@@ -2,13 +2,14 @@\n import assert from \"node:assert/strict\";\n import { refundOrder } from \"../src/refunds.js\";\n \n-test(\"refunds a paid order\", () => {\n+test(\"refunds a paid order and records it in the ledger\", () => {\n   const paid = [];\n-  const res = refundOrder({ id: \"o1\", status: \"paid\", totalCents: 500 }, (id, c) => paid.push([id, c]));\n+  const ledger = [];\n+  const entry = refundOrder({ id: \"o1\", status: \"paid\", totalCents: 500 }, (id, c) => paid.push([id, c]), ledger, 1000);\n   assert.deepEqual(paid, [[\"o1\", 500]]);\n-  assert.equal(res.status, \"refunded\");\n+  assert.deepEqual(ledger, [entry]);\n });\n \n test(\"rejects pending orders\", () => {\n-  assert.throws(() => refundOrder({ id: \"o2\", status: \"pending\", totalCents: 1 }, () => {}));\n+  assert.throws(() => refundOrder({ id: \"o2\", status: \"pending\", totalCents: 1 }, () => {}, [], 0));\n });\n```"
+  },
+  "ground_truth": {
+    "proposal_status": "materially_flawed",
+    "acceptable_verdicts": [
+      "MODIFY",
+      "REPLACE"
+    ],
+    "defect_kind": "typecheck",
+    "mechanically_confirmable": true,
+    "material_issue": "The double-refund guard still compares order.status to 'refunded', which can no longer happen: the same order can now be paid out repeatedly. tsc reports the comparison as having no overlap (TS2367). The guard must check the ledger.",
+    "required_observations": [
+      "Double-refund guard is dead (status never becomes refunded)",
+      "Must check the ledger for existing refunds / typecheck error TS2367"
+    ],
+    "notes": ""
+  }
+}

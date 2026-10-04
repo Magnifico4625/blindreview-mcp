@@ -1,0 +1,31 @@
+{
+  "id": "email-domain-case",
+  "title": "Lowercase only the domain part of e-mail addresses",
+  "category": "data-quality",
+  "source": {
+    "type": "synthetic",
+    "note": "Written by the repository author for v0.4.0 (repo-snapshot case)."
+  },
+  "input": {
+    "objective": "Users signing up as john@Example.com and john@example.com get two accounts. Normalize addresses so the domain case does not matter.",
+    "constraints": [
+      "Product/legal decision: the local part must be stored exactly as typed (a few enterprise customers run case-sensitive mail servers; RFC 5321 allows it).",
+      "No bulk rewrite of existing rows in this change (a separate backfill ticket exists)."
+    ],
+    "context": "Signup service (Node.js 20, ESM JavaScript with JSDoc types). normalizeEmail() is applied before the uniqueness check and before storage.",
+    "decision_type": "implementation",
+    "risk_level": "medium",
+    "proposed_solution": "Lowercase only the domain (after the last '@'), keep the local part exactly as typed, keep trimming. Strings without a usable '@' are returned trimmed. Added tests for domain-only lowercasing, quoted local parts containing '@', and input without a domain.\n\nPatch (already applied in the repository snapshot):\n```diff\n--- a/src/email.js\n+++ b/src/email.js\n@@ -2,8 +2,12 @@\n \n /**\n  * Normalize an e-mail address for storage and uniqueness checks.\n+ * The domain is case-insensitive (RFC 5321 §2.4); the local part is preserved as typed.\n  * @param {string} email\n  */\n export function normalizeEmail(email) {\n-  return email.trim();\n+  const trimmed = email.trim();\n+  const at = trimmed.lastIndexOf(\"@\");\n+  if (at <= 0) return trimmed;\n+  return trimmed.slice(0, at) + \"@\" + trimmed.slice(at + 1).toLowerCase();\n }\n--- a/test/email.test.js\n+++ b/test/email.test.js\n@@ -3,3 +3,7 @@\n import { normalizeEmail } from \"../src/email.js\";\n \n test(\"trims whitespace\", () => assert.equal(normalizeEmail(\"  a@example.com \"), \"a@example.com\"));\n+\n+test(\"lowercases the domain only\", () => assert.equal(normalizeEmail(\"John.Doe@Example.COM\"), \"John.Doe@example.com\"));\n+test(\"uses the last @ (quoted local parts)\", () => assert.equal(normalizeEmail('\"a@b\"@EXAMPLE.com'), '\"a@b\"@example.com'));\n+test(\"leaves strings without a domain alone\", () => assert.equal(normalizeEmail(\" nodomain \"), \"nodomain\"));\n```"
+  },
+  "ground_truth": {
+    "proposal_status": "correct",
+    "acceptable_verdicts": [
+      "KEEP"
+    ],
+    "defect_kind": "none",
+    "mechanically_confirmable": false,
+    "material_issue": "",
+    "required_observations": [],
+    "notes": "Tempting nitpick: lowercasing the whole address (explicitly excluded by the constraint) or demanding the backfill in the same change."
+  }
+}

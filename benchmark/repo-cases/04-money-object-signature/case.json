@@ -1,0 +1,35 @@
+{
+  "id": "money-object-signature",
+  "title": "Change formatPrice to take a Money object",
+  "category": "refactor",
+  "source": {
+    "type": "synthetic",
+    "note": "Written by the repository author for v0.4.0 (repo-snapshot case)."
+  },
+  "input": {
+    "objective": "We keep passing amount and currency separately and twice shipped bugs where they were swapped between two different prices. Introduce a Money value ({cents, currency}) and make formatPrice take it.",
+    "constraints": [
+      "Rendering output must stay identical.",
+      "Ship as one small PR."
+    ],
+    "context": "Storefront (Node.js 20, ESM JavaScript with JSDoc types checked by `tsc --noEmit`). formatPrice() lives in src/money.js.",
+    "decision_type": "refactor",
+    "risk_level": "medium",
+    "proposed_solution": "Add a `Money` typedef and change formatPrice(cents, currency) to formatPrice(money). I updated the call site in cart.js, which is the only caller, and adjusted the unit test. Output is identical.\n\nPatch (already applied in the repository snapshot):\n```diff\n--- a/src/cart.js\n+++ b/src/cart.js\n@@ -7,5 +7,5 @@\n  */\n export function cartTotalLabel(lines, currency) {\n   const total = lines.reduce((sum, l) => sum + l.cents * l.qty, 0);\n-  return `Total: ${formatPrice(total, currency)}`;\n+  return `Total: ${formatPrice({ cents: total, currency })}`;\n }\n--- a/src/money.js\n+++ b/src/money.js\n@@ -1,10 +1,11 @@\n // @ts-check\n \n+/** @typedef {{ cents: number, currency: string }} Money */\n+\n /**\n- * @param {number} cents\n- * @param {string} currency ISO 4217 code\n+ * @param {Money} money\n  * @returns {string}\n  */\n-export function formatPrice(cents, currency) {\n-  return new Intl.NumberFormat(\"en-US\", { style: \"currency\", currency }).format(cents / 100);\n+export function formatPrice(money) {\n+  return new Intl.NumberFormat(\"en-US\", { style: \"currency\", currency: money.currency }).format(money.cents / 100);\n }\n--- a/test/money.test.js\n+++ b/test/money.test.js\n@@ -3,5 +3,5 @@\n import { formatPrice } from \"../src/money.js\";\n \n test(\"formats cents as currency\", () => {\n-  assert.equal(formatPrice(123456, \"USD\"), \"$1,234.56\");\n+  assert.equal(formatPrice({ cents: 123456, currency: \"USD\" }), \"$1,234.56\");\n });\n```"
+  },
+  "ground_truth": {
+    "proposal_status": "materially_flawed",
+    "acceptable_verdicts": [
+      "MODIFY",
+      "REPLACE"
+    ],
+    "defect_kind": "typecheck",
+    "mechanically_confirmable": true,
+    "material_issue": "src/invoice.js still calls formatPrice(line.cents, invoice.currency); with the new signature invoices render garbage / throw. tsc reports the wrong call in invoice.js; tests do not cover invoices.",
+    "required_observations": [
+      "invoice.js still uses the old two-argument signature",
+      "Typecheck fails / invoices break"
+    ],
+    "notes": ""
+  }
+}
