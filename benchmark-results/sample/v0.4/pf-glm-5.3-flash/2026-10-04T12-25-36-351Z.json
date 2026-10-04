@@ -1,0 +1,1101 @@
+{
+  "schema": "blindreview-repo-benchmark/v1",
+  "label": "pf-glm-5.3-flash",
+  "created_at": "2026-10-04T12:25:36.351Z",
+  "git": {
+    "sha": "0da85e980a70c5aef0e2db98afa249dac75abc09",
+    "dirty": true
+  },
+  "model": "z-ai/glm-5.3-flash",
+  "base_url_host": "openrouter.ai",
+  "config": {
+    "evidence_limits": {
+      "maxToolCalls": 8,
+      "maxReviewTokens": 80000,
+      "maxTokensPerCall": 8000,
+      "timeoutMs": 300000
+    },
+    "text_max_review_tokens": 24000,
+    "text_max_tokens_per_call": 6000,
+    "reasoning_effort": null,
+    "temperature": null,
+    "retries": 2,
+    "concurrency": 4
+  },
+  "pricing": {
+    "prompt": 1.5e-7,
+    "completion": 5e-7
+  },
+  "case_set_hash": "2239b07cb5552217",
+  "case_count": 20,
+  "prompt_hashes": {
+    "proposal_first": "86399d1d74424d49",
+    "proposal_first_2pass": "babc3ad0bb43463c",
+    "blind_first": "d62bdbaf1e4a7d18",
+    "repair": "1cd5c9f17886635b",
+    "independent_only": "16d4fca86343b220",
+    "decision_judge": "60b581a50444a02e",
+    "evidence_gate": "27b99c0914be4874"
+  },
+  "modes": [
+    "proposal_first"
+  ],
+  "runs": 1,
+  "seed": 42,
+  "records": [
+    {
+      "case_id": "bounded-lru-memoize",
+      "run": 1,
+      "mode": "proposal_first",
+      "model": "z-ai/glm-5.3-flash",
+      "attempts": 1,
+      "retries": [],
+      "ok": true,
+      "usage_all_attempts": {
+        "prompt_tokens": 1102,
+        "completion_tokens": 2797,
+        "total_tokens": 3899
+      },
+      "cost_usd_all_attempts": 0.000875728,
+      "cost_source": "reported",
+      "latency_ms": 42790,
+      "verdict": "KEEP",
+      "review": {
+        "verdict": "KEEP",
+        "recommendation": "The LRU implementation is correct: the delete/re-insert hit path maintains recency order, eviction fires only on insert so size never exceeds the cap, and the edge case maxEntries <= 0 degrades safely to a no-cache. The new test correctly exercises the eviction order (I traced it: calls goes 2 → 3 → 4 exactly as asserted) and the default-arg path is already covered by the pre-existing tests since they call memoize(fn) with one argument. Both stated constraints are met (no new deps; no-size callers keep working via the default). Optionally add a test that inserts >500 keys under the default cap to pin the constant, but this is not blocking.",
+        "critical_assumptions": [
+          "No existing call site passes a second argument to memoize(); any such argument would now be silently interpreted as maxEntries (signature change).",
+          "Memoized return values are primitives, or callers never compare returned objects by identity (eviction + recompute yields a new object for non-primitives).",
+          "500 is at least as large as the hot working set of keys; otherwise eviction could increase fn() invocations versus the old unbounded cache.",
+          "fn remains synchronous and deterministic (pre-existing contract, unchanged by the patch)."
+        ],
+        "material_risks": [
+          "Silent behavior change for any caller that already passes extra arguments, since the second parameter now has meaning.",
+          "Returned-object identity instability after eviction for non-primitive memoized values could break ===-based consumers (low risk for country-name strings).",
+          "maxEntries <= 0 disables caching entirely without validation or documentation; a typo like memoize(fn, 0) silently kills the cache.",
+          "Per-hit cost rises from one Map lookup to has + get + delete + set; negligible for this workload but a real change if reused on hot paths."
+        ],
+        "falsification_probe": {
+          "description": "Run: grep -rn \"memoize(\" src/ test/ — inspect every call site for a second argument, then run node --test test/memoize.test.js plus a quick script that inserts 501 distinct keys via default memoize(fn) and re-invokes the first key.",
+          "expected_signal": "Any call site with two arguments falsifies the safe-rollout assumption (the stray arg becomes the cap); if the 501-key script shows the first key is recomputed and cache.size <= 500, the default-cap eviction is confirmed rather than falsified."
+        },
+        "confidence": 0.9,
+        "meta": {
+          "review_id": "918ec46d-fc9e-4850-ae02-5a8e737b147c",
+          "review_mode": "proposal_first",
+          "model": "z-ai/glm-5.3-flash",
+          "phases": 1,
+          "usage": {
+            "prompt_tokens": 1102,
+            "completion_tokens": 2797,
+            "total_tokens": 3899
+          },
+          "latency_ms": 42790
+        }
+      }
+    },
+    {
+      "case_id": "config-field-rename",
+      "run": 1,
+      "mode": "proposal_first",
+      "model": "z-ai/glm-5.3-flash",
+      "attempts": 1,
+      "retries": [],
+      "ok": true,
+      "usage_all_attempts": {
+        "prompt_tokens": 1081,
+        "completion_tokens": 1824,
+        "total_tokens": 2905
+      },
+      "cost_usd_all_attempts": 0.001141708,
+      "cost_source": "reported",
+      "latency_ms": 23352,
+      "verdict": "KEEP",
+      "review": {
+        "verdict": "KEEP",
+        "recommendation": "The patch is a clean, mechanical rename: typedef, loadConfig() output key, the single claimed reader (src/http.js), and both tests are all updated consistently, and the env var API_TIMEOUT_MS is correctly left untouched, satisfying both constraints. Before merging, run the cheap completeness check: grep the repo for case-sensitive 'timeoutMs' (it will not match 'requestTimeoutMs') and run 'npx tsc --noEmit' plus the test suite. The one unverified claim is that src/http.js is the only reader — the snapshot lists src/worker.js and says config is 'passed around', so confirm worker.js never touches config.timeoutMs. If grep and tsc are clean, keep as is.",
+        "critical_assumptions": [
+          "src/worker.js never reads config.timeoutMs (it appears in the snapshot but is absent from the diff; 'config is passed around' suggests it consumes Config).",
+          "No other consumers exist (scripts, docs, exported fixtures) that destructure the timeoutMs key from loadConfig()'s return object.",
+          "tsconfig.json has checkJs enabled and includes src/worker.js, so any missed typed reader would fail 'tsc --noEmit'.",
+          "The 'timeout' key returned by requestOptions() is an external output contract and correctly left unchanged.",
+          "The two test files shown are the only tests referencing the field."
+        ],
+        "material_risks": [
+          "If worker.js (or any unshown file) reads config.timeoutMs, the rename silently yields undefined/NaN at runtime — e.g., a request issued with no timeout — unless checkJs catches it.",
+          "If worker.js is excluded from tsc's project files or accesses config loosely (e.g., dynamic property access), the missed reader ships without a typecheck error.",
+          "Any downstream serialization of the config object (logging/metrics keyed on 'timeoutMs') would silently change shape, violating 'no behavior change' in observability if such usage exists."
+        ],
+        "falsification_probe": {
+          "description": "Run: grep -rnE '(^|[^a-zA-Z])timeoutMs' src test && npx tsc --noEmit && npm test",
+          "expected_signal": "Zero grep matches for the old field name (case-sensitive, so 'requestTimeoutMs' is not a false positive), zero tsc errors, and all tests passing would confirm the rename is complete; any match or type error falsifies the 'every reader updated' claim, most likely in src/worker.js."
+        },
+        "confidence": 0.82,
+        "meta": {
+          "review_id": "bdd5fe0c-e8bb-4101-893b-01575a715c0b",
+          "review_mode": "proposal_first",
+          "model": "z-ai/glm-5.3-flash",
+          "phases": 1,
+          "usage": {
+            "prompt_tokens": 1081,
+            "completion_tokens": 1824,
+            "total_tokens": 2905
+          },
+          "latency_ms": 23352
+        }
+      }
+    },
+    {
+      "case_id": "csv-rfc4180-quoting",
+      "run": 1,
+      "mode": "proposal_first",
+      "model": "z-ai/glm-5.3-flash",
+      "attempts": 2,
+      "retries": [
+        {
+          "code": "TIMEOUT",
+          "message": "Review exceeded REVIEW_TIMEOUT=120000ms"
+        }
+      ],
+      "ok": true,
+      "usage_all_attempts": {
+        "prompt_tokens": 976,
+        "completion_tokens": 1947,
+        "total_tokens": 2923
+      },
+      "cost_usd_all_attempts": 0.000627144,
+      "cost_source": "mixed",
+      "latency_ms": 62662,
+      "verdict": "KEEP",
+      "review": {
+        "verdict": "KEEP",
+        "recommendation": "The csvField() implementation is correct per RFC 4180: quoting on comma, double quote, CR, and LF, with embedded quotes doubled, and plain fields pass through byte-identically (String(value ?? \"\") matches the previous coercion exactly). The new test correctly verifies all three quoting triggers, including the embedded newline inside quotes. Optional hardening: add a round-trip assertion through the actual ETL importer's parser so the test guards the real contract, not just the writer.",
+        "critical_assumptions": [
+          "The internal ETL importer genuinely implements RFC 4180 quoted-field parsing (doubled-quote unescaping and embedded line breaks inside quotes), as the constraint asserts.",
+          "toCsv() in src/csv.js is the only code path that emits this nightly export; no parallel hand-rolled writer exists elsewhere.",
+          "Cell values are always string | number | null (bigint or object values would still work at runtime via String() but fall outside the declared JSDoc types).",
+          "The importer tolerates a bare LF (not just CRLF) inside a quoted field; the regex quotes on lone \\n and lone \\r, which is stricter than RFC 4180's CRLF wording but safe for any compliant parser."
+        ],
+        "material_risks": [
+          "The test only validates the writer's output string; it never round-trips through the real ETL parser, so if the importer's quoted-field handling is buggy or absent (contrary to the stated constraint), the nightly job still breaks and CI stays green.",
+          "Header cells now also get quoted (correctly), which changes bytes for any header containing a comma — technically a fix, but it is a byte-level change to output some consumers might compare; per the stated constraints this is fine."
+        ],
+        "falsification_probe": {
+          "description": "Run `node --test test/csv.test.js`, then feed toCsv([\"note\"], [[\"a,b\\nline2\"]]) output into the actual ETL importer's parser and assert the parsed row equals the original record.",
+          "expected_signal": "Tests pass and the importer yields the single field 'a,b\\nline2' — confirms the fix end-to-end. A parse error, split row, or misaligned columns falsifies either the writer or (more importantly) the assumption that the importer handles quoted fields."
+        },
+        "confidence": 0.92,
+        "meta": {
+          "review_id": "88f8c68f-c598-48d3-bed8-cdde20935b0a",
+          "review_mode": "proposal_first",
+          "model": "z-ai/glm-5.3-flash",
+          "phases": 1,
+          "usage": {
+            "prompt_tokens": 976,
+            "completion_tokens": 1947,
+            "total_tokens": 2923
+          },
+          "latency_ms": 62662
+        }
+      }
+    },
+    {
+      "case_id": "debounce-clear-timer",
+      "run": 1,
+      "mode": "proposal_first",
+      "model": "z-ai/glm-5.3-flash",
+      "attempts": 2,
+      "retries": [
+        {
+          "code": "TIMEOUT",
+          "message": "Review exceeded REVIEW_TIMEOUT=120000ms"
+        }
+      ],
+      "ok": true,
+      "usage_all_attempts": {
+        "prompt_tokens": 900,
+        "completion_tokens": 3057,
+        "total_tokens": 3957
+      },
+      "cost_usd_all_attempts": 0.00093156,
+      "cost_source": "mixed",
+      "latency_ms": 56522,
+      "verdict": "KEEP",
+      "review": {
+        "verdict": "KEEP",
+        "recommendation": "The diagnosis is correct: the original closure never cancelled the previously scheduled timer, so every call fired after waitMs. The patch implements the canonical trailing-only debounce (clear pending, schedule, reset handle on fire) while preserving the (fn, waitMs, timers) signature, and the new burst test pins the intended last-call-wins behavior. Before merging, confirm the injectable fake-timers helper exposes clearTimer; otherwise the fallback clearTimeout is a silent no-op on fake handles and the burst test will fail. If fakeTimers lacks clearTimer, extend the helper rather than altering debounce().",
+        "critical_assumptions": [
+          "fakeTimers() in test/debounce.test.js implements clearTimer whose handles round-trip with its setTimer (the fallback clearTimeout does nothing useful on fake handles).",
+          "search.js's only defect was calling the broken debounce per keystroke; no call-site change is needed.",
+          "Trailing-only semantics (no leading/immediate edge) are the desired behavior for the search box.",
+          "Node 20's clearTimeout safely no-ops on stale or non-Timer handles, so the fallback path never throws with real timers."
+        ],
+        "material_risks": [
+          "If the test fake timers object lacks clearTimer, the fallback clearTimeout is a no-op on fake handles: all three burst calls fire, the new test fails ([1,2,3] instead of [3]), and CI goes red.",
+          "If a custom injectable setTimer returns undefined (or a reused handle), the `pending !== undefined` guard misses pending timers and the per-keystroke bug persists for that timer implementation.",
+          "None for the real search path: default setTimeout returns a truthy unique Timeout object, so cancellation works there."
+        ],
+        "falsification_probe": {
+          "description": "Run the suite: `npm test` (or `node --test test/debounce.test.js`); alternatively grep the fakeTimers definition in test/debounce.test.js for a clearTimer method.",
+          "expected_signal": "Burst test passing with calls === [3] (and the fake-timers helper defining clearTimer) confirms the fix; a result of [1,2,3], a TypeError from clearTimeout on a fake handle, or an absent clearTimer in fakeTimers falsifies it."
+        },
+        "confidence": 0.78,
+        "meta": {
+          "review_id": "5455203a-a669-4ca9-9024-19ad114ee4ee",
+          "review_mode": "proposal_first",
+          "model": "z-ai/glm-5.3-flash",
+          "phases": 1,
+          "usage": {
+            "prompt_tokens": 900,
+            "completion_tokens": 3057,
+            "total_tokens": 3957
+          },
+          "latency_ms": 56522
+        }
+      }
+    },
+    {
+      "case_id": "drop-legacy-id-column",
+      "run": 1,
+      "mode": "proposal_first",
+      "model": "z-ai/glm-5.3-flash",
+      "attempts": 2,
+      "retries": [
+        {
+          "code": "TIMEOUT",
+          "message": "Review exceeded REVIEW_TIMEOUT=120000ms"
+        }
+      ],
+      "ok": true,
+      "usage_all_attempts": {
+        "prompt_tokens": 998,
+        "completion_tokens": 2778,
+        "total_tokens": 3776
+      },
+      "cost_usd_all_attempts": 0.000861672,
+      "cost_source": "mixed",
+      "latency_ms": 51161,
+      "verdict": "MODIFY",
+      "review": {
+        "verdict": "MODIFY",
+        "recommendation": "The direction is right, but 'nothing reads it anymore' is asserted, not verified, and the snapshot deliberately includes src/reports/partner-export.js, test/partner-export.test.js, and db/schema.sql — none of which the patch touches or proves clean. Run a repo-wide grep for legacy_id/legacyId and confirm partner-export and schema.sql are free of references before shipping an irreversible DROP COLUMN. Update db/schema.sql (or explicitly confirm it is migration-managed and migrations run on fresh databases) so fresh environments don't drift from migrated ones. Guard the migration: confirm the deployed SQLite version is >= 3.35 (DROP COLUMN support) and that legacy_id has no index/unique/view/trigger references, which make SQLite DROP COLUMN fail at deploy time; optionally archive the column (CREATE TABLE _archive_users_legacy AS SELECT id, legacy_id FROM users) first as cheap insurance.",
+        "critical_assumptions": [
+          "The bundled/driver SQLite version is >= 3.35, where ALTER TABLE ... DROP COLUMN exists",
+          "legacy_id has no index, UNIQUE constraint, CHECK/FK, view, or trigger reference (SQLite refuses DROP COLUMN in those cases)",
+          "db/schema.sql intentionally still declares legacy_id, or migrations also run against databases created from schema.sql (no schema drift)",
+          "src/reports/partner-export.js and test/partner-export.test.js never select or map legacy_id",
+          "No external consumer (partner ETL, warehouse jobs, exports already sent) still depends on legacyId after the March v1 removal"
+        ],
+        "material_risks": [
+          "If partner-export.js still selects legacy_id, partner exports crash at runtime immediately after deploy",
+          "If legacy_id is indexed (plausible for a legacy lookup key), migration 004 fails during auto-deploy and can block the release",
+          "Unmodified db/schema.sql means fresh environments keep the column while migrated ones lose it — schema drift",
+          "SQLite < 3.35 turns the migration into a syntax error at deploy time",
+          "Irreversible data loss with no archival copy; any later need for legacy_id is unrecoverable outside disaster backups"
+        ],
+        "falsification_probe": {
+          "description": "Run: grep -rniE 'legacy_?id' --exclude-dir=node_modules . and also open db/schema.sql to check the users table definition and any CREATE INDEX on legacy_id",
+          "expected_signal": "Any hit outside migrations/004_drop_legacy_id.sql — especially in src/reports/partner-export.js, test/partner-export.test.js, or db/schema.sql — falsifies the 'nothing reads it anymore' claim; an index or unique constraint on legacy_id falsifies the migration itself. Only the 004 file mentioning legacy_id confirms the proposal."
+        },
+        "confidence": 0.82,
+        "meta": {
+          "review_id": "1f4ca615-6065-4cf8-b1fc-a5d7b6766152",
+          "review_mode": "proposal_first",
+          "model": "z-ai/glm-5.3-flash",
+          "phases": 1,
+          "usage": {
+            "prompt_tokens": 998,
+            "completion_tokens": 2778,
+            "total_tokens": 3776
+          },
+          "latency_ms": 51161
+        }
+      }
+    },
+    {
+      "case_id": "email-domain-case",
+      "run": 1,
+      "mode": "proposal_first",
+      "model": "z-ai/glm-5.3-flash",
+      "attempts": 1,
+      "retries": [],
+      "ok": true,
+      "usage_all_attempts": {
+        "prompt_tokens": 920,
+        "completion_tokens": 3183,
+        "total_tokens": 4103
+      },
+      "cost_usd_all_attempts": 0.00096852,
+      "cost_source": "reported",
+      "latency_ms": 99468,
+      "verdict": "KEEP",
+      "review": {
+        "verdict": "KEEP",
+        "recommendation": "Keep the patch. The lastIndexOf('@') + domain-only toLowerCase() approach is correct for RFC semantics (domain is everything after the last '@', so quoted local parts like '\"a@b\"@X.com' are handled), satisfies the keep-local-part-as-typed constraint, and normalization before both uniqueness check and storage makes new-signup dedup consistent. Before merge, verify the actual uniqueness-check call site passes its input through this same function and that the DB unique index is on the normalized stored value, since a mismatch there silently reintroduces duplicates. Document that legacy rows with uppercase domains will not dedupe until the backfill ticket runs — that gap is inherent to the no-rewrite constraint, not a flaw in this patch.",
+        "critical_assumptions": [
+          "Every code path that writes or looks up emails (signup, OAuth callbacks, admin/import tools) calls normalizeEmail; none bypass it.",
+          "The uniqueness lookup compares the normalized input against the normalized stored column (not raw legacy values), so a unique constraint on the stored value suffices without a case-insensitive collation.",
+          "Upstream validation rejects inputs without a usable '@' or with an empty local part; normalizeEmail is not the last line of defense against malformed input.",
+          "Duplicate accounts versus pre-existing mixed-case-domain rows are an accepted, temporary condition until the separate backfill runs.",
+          "Emails are ASCII or, if internationalized, the local part's Unicode casing is intentionally preserved per the legal decision (no IDNA/punycode canonicalization is in scope)."
+        ],
+        "material_risks": [
+          "Until backfill, a new signup of user@example.com will not collide with a legacy row user@Example.com, creating a real duplicate account the backfill must later merge.",
+          "If any write path stores emails without calling normalizeEmail, those rows become permanent near-duplicates that only the backfill can reconcile.",
+          "Malformed inputs ('nodomain', 'a@b@c.com') are stored as-is if validation is absent or relies on the normalizer, polluting the uniqueness key space.",
+          "If another component (e.g., MX/domain parsing for verification emails) splits on the first '@' while storage splits on the last, quoted local-part addresses will be treated inconsistently across the service."
+        ],
+        "falsification_probe": {
+          "description": "Run `grep -rn \"normalizeEmail\" src/ | grep -v 'src/email.js'` (and, if present, inspect the uniqueness-check/INSERT call sites it reveals) to confirm normalization is actually applied before the uniqueness check and before storage as claimed.",
+          "expected_signal": "At least one call site in the signup/uniqueness path applying normalizeEmail to the input, and a unique index/constraint on the normalized stored column. Absence of any call site, or a lookup comparing raw input against stored rows, falsifies the claim that this patch prevents duplicate accounts."
+        },
+        "confidence": 0.87,
+        "meta": {
+          "review_id": "e98fe7f7-5a6f-4c56-b5cd-6a104dd0be9a",
+          "review_mode": "proposal_first",
+          "model": "z-ai/glm-5.3-flash",
+          "phases": 1,
+          "usage": {
+            "prompt_tokens": 920,
+            "completion_tokens": 3183,
+            "total_tokens": 4103
+          },
+          "latency_ms": 99468
+        }
+      }
+    },
+    {
+      "case_id": "fast-password-hash",
+      "run": 1,
+      "mode": "proposal_first",
+      "model": "z-ai/glm-5.3-flash",
+      "attempts": 1,
+      "retries": [],
+      "ok": true,
+      "usage_all_attempts": {
+        "prompt_tokens": 1255,
+        "completion_tokens": 3358,
+        "total_tokens": 4613
+      },
+      "cost_usd_all_attempts": 0.00104566,
+      "cost_source": "reported",
+      "latency_ms": 106142,
+      "verdict": "REPLACE",
+      "review": {
+        "verdict": "REPLACE",
+        "recommendation": "Do not ship: single-pass salted SHA-256 is not a password KDF; it makes all 4M hashes offline-crackable at billions of guesses/sec/GPU, which is exactly what the 210k-round PBKDF2 was preventing. Keep the dual-format verify + lazy-rehash migration pattern, but make the new format a memory-hard KDF already built into Node: crypto.scrypt from node:crypto (built-in module, satisfies 'no new runtime dependencies'), tuned (e.g. N=2^15, r=8, p=1, 32-byte key) to a measured ~50-80 ms on prod hardware. If scrypt latency misses the budget on real hardware, fall back to lower-iteration PBKDF2-SHA256 (never raw SHA-256) and re-tune.",
+        "critical_assumptions": [
+          "The users-table replication to the analytics warehouse either excludes the password_hash column or every internal team with warehouse query access is fully trusted; with salted SHA-256, any read of that column becomes an offline dictionary-attack feed.",
+          "The login flow actually calls needsRehash() and rewrites the stored hash only after successful verification; the diff adds the helper but no caller is shown.",
+          "Latency is dominated by hashing (stated), so a ~50-80 ms KDF alone lands p95 under 100 ms.",
+          "The truncated passwords.js still contains a correct derive()/unhex() legacy path and the format string is parsed safely for malformed stored values.",
+          "No compliance regime (NIST SP 800-63B, OWASP ASVS 2.4) applies that explicitly forbids fast hashes for password storage."
+        ],
+        "material_risks": [
+          "Mass offline cracking: one GPU does ~10+ GH/s on salted SHA-256; a single warehouse snapshot or backup leak yields a large fraction of 4M plaintext passwords, enabling credential stuffing against this and other services.",
+          "Secret-less timing/compare issues: sha256 path compares strings with === (not constant-time) and never validates the digest length; needsRehash(null) throws TypeError (null has no startsWith), risking 500s on accounts with empty hash columns.",
+          "Compliance/audit failure and forced emergency rotation later is far more disruptive than choosing a proper KDF now.",
+          "If the lazy-rehook caller is wired to any non-verified path (e.g. rehash on failed login or on needsRehash alone), it corrupts credentials and effectively forces the prohibited password resets."
+        ],
+        "better_alternative": "Same migration mechanics (verify both formats, needsRehash flag, upgrade after successful login) but new format = scrypt via node:crypto with parameters benchmarked to fit the latency budget; alternatively PBKDF2 with a reduced, still-slow iteration count as a stopgap. Both are zero-new-dependency and preserve brute-force resistance.",
+        "falsification_probe": {
+          "description": "Run in the repo: node -e \"const c=require('node:crypto'); console.time('scrypt'); c.scryptSync('pw','salt',32,{N:32768,r:8,p:1,maxmem:132*1024*1024}); console.timeEnd('scrypt')\" on a production-spec instance, and separately benchmark current hashPassword latency.",
+          "expected_signal": "If scrypt completes in <100 ms (typical ~30-80 ms for these params), the premise that the p95 target requires abandoning a hard KDF is falsified and REPLACE is confirmed; if it cannot meet the budget even after parameter tuning, downgrade to lower-iteration PBKDF2 and re-evaluate."
+        },
+        "confidence": 0.96,
+        "meta": {
+          "review_id": "69949928-f844-4781-991c-192567f9aa4f",
+          "review_mode": "proposal_first",
+          "model": "z-ai/glm-5.3-flash",
+          "phases": 1,
+          "usage": {
+            "prompt_tokens": 1255,
+            "completion_tokens": 3358,
+            "total_tokens": 4613
+          },
+          "latency_ms": 106142
+        }
+      }
+    },
+    {
+      "case_id": "in-memory-rate-limit",
+      "run": 1,
+      "mode": "proposal_first",
+      "model": "z-ai/glm-5.3-flash",
+      "attempts": 1,
+      "retries": [],
+      "ok": true,
+      "usage_all_attempts": {
+        "prompt_tokens": 1238,
+        "completion_tokens": 2545,
+        "total_tokens": 3783
+      },
+      "cost_usd_all_attempts": 0.00171090088,
+      "cost_source": "reported",
+      "latency_ms": 73989,
+      "verdict": "MODIFY",
+      "review": {
+        "verdict": "MODIFY",
+        "recommendation": "The patch removes the network hop but silently changes the enforced limit: with 12 round-robin replicas and no affinity, each replica independently allows 100 req/min per key, so the true aggregate limit becomes up to 1,200 req/min — breaching the contractual 100/min cap and triggering vendor billing overages. Do not merge as-is. Either (a) keep per-replica in-process counters but set the per-replica limit to ~ceil(100/12) = 9 via env config (accepting ~±10% drift and adding an alert on actual vendor-billed overages), or (b) keep Redis and attack the 15 ms p99 via connection pooling/pipelining instead. Option (a) is the only path that both removes the latency and approximately preserves the contract.",
+        "critical_assumptions": [
+          "The load balancer distributes any single API key's traffic roughly evenly across all 12 replicas, with no keep-alive connection pinning and no autoscaling (replica count stays 12, or quota is reconfigured when it changes).",
+          "The per-replica '100' number is what matters, when in fact the contract is an aggregate per-key cap across the whole fleet.",
+          "Rolling deploys/restarts mid-window resetting local counters is acceptable extra headroom for partners.",
+          "Node's single-threaded event loop makes the get/increment race-free (true here, since allow() has no awaits between read and write).",
+          "The Redis cluster is used by nothing else (stated in context, so decommissioning is safe if the limiter is replaced)."
+        ],
+        "material_risks": [
+          "Aggregate per-key throughput up to 12x the contractual cap → direct vendor billing overage and possible contract breach; this is the exact constraint the task protects.",
+          "Inconsistent enforcement across replicas under uneven load: a hot replica rejects a key at its local 100 while other replicas would still allow the same key on the next request — non-deterministic 429 behavior partners will report.",
+          "Every rolling deploy and crash-restart resets all local counters mid-window, granting each restarted replica a fresh full quota.",
+          "With no shared state, there is no way to later support per-key tiered limits, burst budgets, or audit of true request counts without reintroducing shared state.",
+          "If quota partitioning (limit/12) is later adopted without the LB-distribution assumption being verified, bursty keys can be falsely throttled."
+        ],
+        "better_alternative": "Keep in-process counters (achieves the latency goal) but divide the quota: LIMIT_PER_REPLICA = ceil(limit / replicaCount) injected via env, sized so replicas x per-replica limit ≈ the contractual cap with a small pre-approved overage budget. Optionally keep Redis as a background reconciler sampling replica counts every few seconds to correct drift — it already exists, so no new infrastructure. Add a daily reconciliation alert comparing actual vendor-billed requests per key against 100/min to catch partition drift.",
+        "falsification_probe": {
+          "description": "Load test through the real gateway LB: single API key, fire 300 requests in one 60-second window (e.g. `k6 run --vus 5 --duration 60s` against the partner endpoint with one key), then count (1) how many requests received 429 and (2) how many requests the upstream vendor actually billed.",
+          "expected_signal": "Falsifies the patch if fewer than ~200 requests are rejected and vendor-side billed count exceeds 100 (with 12 replicas the patch permits up to ~1200/min before any 429). Confirms a correct limiter if exactly 100 requests reach upstream and ~200 get 429."
+        },
+        "confidence": 0.86,
+        "meta": {
+          "review_id": "d8fdc311-e239-49f2-824f-88538d7d826c",
+          "review_mode": "proposal_first",
+          "model": "z-ai/glm-5.3-flash",
+          "phases": 1,
+          "usage": {
+            "prompt_tokens": 1238,
+            "completion_tokens": 2545,
+            "total_tokens": 3783
+          },
+          "latency_ms": 73989
+        }
+      }
+    },
+    {
+      "case_id": "inclusive-end-date",
+      "run": 1,
+      "mode": "proposal_first",
+      "model": "z-ai/glm-5.3-flash",
+      "attempts": 1,
+      "retries": [],
+      "ok": true,
+      "usage_all_attempts": {
+        "prompt_tokens": 1101,
+        "completion_tokens": 2784,
+        "total_tokens": 3885
+      },
+      "cost_usd_all_attempts": 0.000872004,
+      "cost_source": "reported",
+      "latency_ms": 38355,
+      "verdict": "KEEP",
+      "review": {
+        "verdict": "KEEP",
+        "recommendation": "The half-open interval [start-of-from, start-of-(to+1)) in UTC is the correct fix for 'both dates inclusive' day semantics, and pure epoch-millisecond arithmetic (Date.parse + DAY_MS) is exact for UTC days since JS time has no DST or leap seconds. The added boundary test (23:59:59.999 included, next-day 00:00:00.000 excluded) directly covers the reported bug. Ship it; optionally add boundary events at exactly from-midnight and to-midnight to lock the lower inclusive bound too.",
+        "critical_assumptions": [
+          "All event.at values are ISO-8601 strings that Date.parse resolves to the correct UTC instant (per the stated UTC-only constraint; offsets like -04:00 would still be handled correctly).",
+          "UTC days are exactly 86,400,000 ms in JS epoch time — true for JS Date, which ignores leap seconds.",
+          "Callers never pass from > to (inverted ranges silently return [], pre-existing behavior, unchanged by this patch).",
+          "to is always a full calendar date (YYYY-MM-DD), never a timestamp; the half-open bound would be wrong only if to encoded a sub-day instant, which the API contract excludes.",
+          "test/range.test.js already imports test/assert from node:test/node:assert so the appended test runs in the existing suite."
+        ],
+        "material_risks": [
+          "If any producer ever emits timestamps with >3 fractional-second digits (e.g., .9995Z), Date.parse behavior for non-ES-ISO formats is implementation-dependent and could shift a boundary event by ~1 ms across the exclusive end — cosmetic, not day-level damage.",
+          "If future code reuses this DAY_MS-addition pattern on local-time-parsed bounds (not UTC 'Z' strings), DST transitions would break the +1-day arithmetic; the current UTC-only constraint makes this safe today but it's a latent footgun.",
+          "Invalid from/to inputs yield NaN bounds and an empty result (NaN comparisons are false); unchanged from before, but the fix does not add validation, so a malformed 'to' still silently returns no data."
+        ],
+        "falsification_probe": {
+          "description": "Run the test suite: cd repo && node --test test/range.test.js. Additionally verify the exact boundaries in a REPL: node -e \"const D=86400000,s=Date.parse('2026-03-01T00:00:00Z'),e=Date.parse('2026-03-31T00:00:00Z')+D; console.log(Date.parse('2026-03-31T00:00:00Z')>=s && Date.parse('2026-03-31T00:00:00Z')<e, Date.parse('2026-03-31T23:59:59.999Z')<e, Date.parse('2026-04-01T00:00:00Z')<e)\"",
+          "expected_signal": "Both tests pass and the REPL prints 'true true false' (to-midnight included, last-ms of the day included, next-day midnight excluded). If 'next' appears in the test result or the REPL prints any 'false' in the first two positions / 'true' in the third, the fix is wrong. A 'true false false' pattern would indicate the old code is still in place."
+        },
+        "confidence": 0.92,
+        "meta": {
+          "review_id": "a3d2ff55-694a-458a-94db-5237731e65e0",
+          "review_mode": "proposal_first",
+          "model": "z-ai/glm-5.3-flash",
+          "phases": 1,
+          "usage": {
+            "prompt_tokens": 1101,
+            "completion_tokens": 2784,
+            "total_tokens": 3885
+          },
+          "latency_ms": 38355
+        }
+      }
+    },
+    {
+      "case_id": "limit-param-validation",
+      "run": 1,
+      "mode": "proposal_first",
+      "model": "z-ai/glm-5.3-flash",
+      "attempts": 1,
+      "retries": [],
+      "ok": true,
+      "usage_all_attempts": {
+        "prompt_tokens": 978,
+        "completion_tokens": 4546,
+        "total_tokens": 5524
+      },
+      "cost_usd_all_attempts": 0.001355032,
+      "cost_source": "reported",
+      "latency_ms": 90098,
+      "verdict": "KEEP",
+      "review": {
+        "verdict": "KEEP",
+        "recommendation": "The patch correctly enforces the documented maximum: parseLimit('100000') now returns 100, protecting the DB, while valid integers 1..100 are bit-for-bit identical to the old parseInt behavior. Invalid input ('abc', '-5', '0', '12abc', '1e3', '') silently falls back to 20 with no thrown error, satisfying both constraints; note it also fixes a latent old bug where '-5' passed through as a negative limit. The regex ^\\s*\\d+\\s*$ is linear (no ReDoS) and Math.min caps even huge-digit strings safely. Keep as is, but add boundary tests ('1', '100', '101', ' 50 ') and document the deliberate strictness change for prefix-parseable strings like '50abc' and '3.7' (old: 50/3; new: 20).",
+        "critical_assumptions": [
+          "All list endpoints obtain their limit exclusively through parseLimit in src/query.js; no endpoint re-parses the raw query itself.",
+          "'Valid existing requests (limit 1..100)' means actual integer values 1..100, not every string the old parseInt prefix-parsed into that range (e.g., '50abc' previously yielded 50, now yields 20).",
+          "The documented maximum of 100 is authoritative and no caller uses a large limit (e.g., 999999) as an undocumented 'unlimited' sentinel.",
+          "DEFAULT_LIMIT=20 matches the old '|| 20' fallback and is the intended default for invalid input.",
+          "URL query decoding precedes parseLimit, so 'limit=+50' arrives as ' 50' and is still accepted by the whitespace-tolerant regex."
+        ],
+        "material_risks": [
+          "Clients sending prefix-parseable strings ('50abc', '3.7', '%2B50') silently receive 20 rows instead of their previous 50/3/50 — a behavior change, though permitted by the 'invalid → default' constraint.",
+          "If any endpoint or client relied on limits above 100 as 'fetch all', clamping to 100 changes result sets; the snapshot shows no such caller, but only src/query.js was inspected.",
+          "Exported MAX_LIMIT/DEFAULT_LIMIT constants are unused elsewhere in the snapshot; if other modules hardcode their own caps (e.g., a pager doing Math.min(limit, 500)), the intended invariant of ≤100 is not centrally enforced."
+        ],
+        "falsification_probe": {
+          "description": "Run `node --test test/query.test.js` and `grep -rn 'parseLimit' src/ test/` to inspect every caller and pre-existing assertion.",
+          "expected_signal": "Falsified if any existing caller or test depends on old lenient semantics (e.g., asserts parseLimit('1e2') === 1, parseLimit('50abc') === 50, or feeds values >100 expecting pass-through); confirmed if all tests pass and every caller consumes the returned number directly."
+        },
+        "confidence": 0.86,
+        "meta": {
+          "review_id": "414cbfd6-a28e-429d-a1e8-5ab546505dfc",
+          "review_mode": "proposal_first",
+          "model": "z-ai/glm-5.3-flash",
+          "phases": 1,
+          "usage": {
+            "prompt_tokens": 978,
+            "completion_tokens": 4546,
+            "total_tokens": 5524
+          },
+          "latency_ms": 90098
+        }
+      }
+    },
+    {
+      "case_id": "live-dashboard-aggregation",
+      "run": 1,
+      "mode": "proposal_first",
+      "model": "z-ai/glm-5.3-flash",
+      "attempts": 1,
+      "retries": [],
+      "ok": true,
+      "usage_all_attempts": {
+        "prompt_tokens": 1140,
+        "completion_tokens": 2026,
+        "total_tokens": 3166
+      },
+      "cost_usd_all_attempts": 0.00066304,
+      "cost_source": "reported",
+      "latency_ms": 41818,
+      "verdict": "REPLACE",
+      "review": {
+        "verdict": "REPLACE",
+        "recommendation": "The freshness goal is right, but the mechanism is incompatible with the stated constraints: at 400 req/s, fetching up to 2M order rows per request from a primary already at ~70% CPU will saturate the database and blow the 200 ms p95 by orders of magnitude, while the Node-side reduce over millions of objects adds GC/memory risk. Replace the per-row fetch with a single-row SQL aggregate (SELECT COUNT(*), COALESCE(SUM(total_cents),0) FROM orders WHERE merchant_id=$1) backed by a covering index (merchant_id, total_cents) for an index-only scan, and put a ~30s TTL cache (Redis or in-process with single-flight) in front, matching the 30s tab auto-refresh so staleness drops from 24h to ≤30s with near-flat DB load. Consider serving cache-first from a replica if one exists.",
+        "critical_assumptions": [
+          "Silently assumes per-merchant order counts are small; the context states up to 2 million rows per merchant.",
+          "Assumes the primary has CPU headroom for 400 req/s of multi-million-row scans; it is already at ~70% CPU at peak.",
+          "Assumes userId can be passed as merchant_id in the orders query (the SQL filters on merchant_id, the API takes userId).",
+          "Assumes Node can hold many concurrent 2M-row result arrays without OOM/GC stalls.",
+          "Assumes merchants need second-level freshness, though the 30s auto-refresh implies ~30s staleness is acceptable."
+        ],
+        "material_risks": [
+          "Primary Postgres CPU saturation, degrading or taking down every DB-backed endpoint, not just the dashboard.",
+          "p95 latency far above 200 ms: shipping and aggregating millions of rows per request takes seconds for large merchants.",
+          "Node memory blowup: 400 req/s with concurrent multi-hundred-MB response buffers risks GC pauses and OOM crashes.",
+          "Worst-case amplification: one large merchant's traffic alone forces full 2M-row scans on every 30s refresh of each open tab.",
+          "Deleting the nightly job later removes the only fallback stats source if the live path degrades."
+        ],
+        "better_alternative": "Serve dashboard stats from a short-TTL cache (~30s, aligned to tab auto-refresh) whose value is computed by a SQL aggregate query (COUNT + SUM) using a covering index on (merchant_id, total_cents), with single-flight recomputation to prevent cache stampedes; optionally read from a replica. This achieves ≤30s freshness within the latency budget and near-zero incremental primary CPU. Keep the nightly job as a fallback until the new path is proven.",
+        "falsification_probe": {
+          "description": "On a staging copy, run EXPLAIN ANALYZE SELECT total_cents, created_at FROM orders WHERE merchant_id = <id of largest merchant>; and time db.ordersForUser() for that merchant end-to-end from Node, then load-test the endpoint at 400 req/s while watching primary CPU.",
+          "expected_signal": "If query time and transferred rows (millions of rows, multi-second execution) exceed the 200 ms budget and primary CPU rises from 70% toward saturation, the proposal is falsified; a sub-10ms single-row aggregate with flat CPU would confirm the alternative."
+        },
+        "confidence": 0.92,
+        "meta": {
+          "review_id": "1bf9363f-dd4e-4e04-a125-bc3261961532",
+          "review_mode": "proposal_first",
+          "model": "z-ai/glm-5.3-flash",
+          "phases": 1,
+          "usage": {
+            "prompt_tokens": 1140,
+            "completion_tokens": 2026,
+            "total_tokens": 3166
+          },
+          "latency_ms": 41818
+        }
+      }
+    },
+    {
+      "case_id": "money-object-signature",
+      "run": 1,
+      "mode": "proposal_first",
+      "model": "z-ai/glm-5.3-flash",
+      "attempts": 1,
+      "retries": [],
+      "ok": true,
+      "usage_all_attempts": {
+        "prompt_tokens": 981,
+        "completion_tokens": 2955,
+        "total_tokens": 3936
+      },
+      "cost_usd_all_attempts": 0.000909804,
+      "cost_source": "reported",
+      "latency_ms": 54173,
+      "verdict": "MODIFY",
+      "review": {
+        "verdict": "MODIFY",
+        "recommendation": "The Money value object is the right fix for the swapped-args bug class, but the claim that cart.js is 'the only caller' is unverified while src/invoice.js sits untouched in the snapshot. Run `grep -rn \"formatPrice(\" src/` and `npx tsc --noEmit` before merging: if invoice.js calls formatPrice, the patch silently breaks it (number passed as `money` -> `money.currency` is undefined -> Intl throws); if it formats prices with its own inline Intl.NumberFormat, the refactor fails its objective. Either migrate invoice.js's price formatting in this PR or explicitly state why it is out of scope, and export the Money typedef (reachable as `import('./money.js').Money`) so other modules construct it consistently.",
+        "critical_assumptions": [
+          "cart.js is truly the only caller of formatPrice (invoice.js never imports or calls it).",
+          "invoice.js contains no duplicate inline price-formatting logic (e.g., its own Intl.NumberFormat) where the cents/currency swap bug could recur.",
+          "tsc --noEmit passes on the patched snapshot; any stale two-arg call would be flagged (which only holds if every consumer file has @ts-check).",
+          "test/cart.test.js asserts cartTotalLabel output and does not invoke formatPrice with the old two-arg signature.",
+          "Wrapping cents/currency in an object does not change Intl.NumberFormat behavior in Node 20 (trivially true, but output-identity rests on it)."
+        ],
+        "material_risks": [
+          "A missed caller in invoice.js passes a number where {cents, currency} is expected; `money.currency` becomes undefined and Intl.NumberFormat with style:'currency' throws RangeError, breaking invoice rendering at runtime.",
+          "If invoice.js lacks // @ts-check, tsc --noEmit will not catch the signature mismatch, so the breakage ships undetected by CI.",
+          "If the historical swapped bugs occurred at the invoice price site with its own formatting code, this PR leaves that bug class fully intact despite the stated objective.",
+          "Money.currency is typed as bare string, so a swapped or invalid code (e.g., cents in the currency field of the object literal is caught by tsc, but 'usd'/'EURO' strings are not) still fails only at runtime with a RangeError."
+        ],
+        "falsification_probe": {
+          "description": "Run `grep -rn \"formatPrice\\|Intl.NumberFormat\" src/ && npx tsc --noEmit && npm test` on the patched snapshot.",
+          "expected_signal": "Falsified if grep shows formatPrice called anywhere other than cart.js, or any other Intl.NumberFormat usage in src/ (e.g., invoice.js), or tsc reports a Money-type error, or any test fails. Confirmed if formatPrice appears only in money.js (definition) and cart.js (call), tsc is clean, and all tests pass."
+        },
+        "confidence": 0.82,
+        "meta": {
+          "review_id": "8a2793ae-b96b-4ecd-aac2-a6bc52694374",
+          "review_mode": "proposal_first",
+          "model": "z-ai/glm-5.3-flash",
+          "phases": 1,
+          "usage": {
+            "prompt_tokens": 981,
+            "completion_tokens": 2955,
+            "total_tokens": 3936
+          },
+          "latency_ms": 54173
+        }
+      }
+    },
+    {
+      "case_id": "new-checkout-flag",
+      "run": 1,
+      "mode": "proposal_first",
+      "model": "z-ai/glm-5.3-flash",
+      "attempts": 1,
+      "retries": [],
+      "ok": true,
+      "usage_all_attempts": {
+        "prompt_tokens": 1233,
+        "completion_tokens": 3772,
+        "total_tokens": 5005
+      },
+      "cost_usd_all_attempts": 0.001974825,
+      "cost_source": "reported",
+      "latency_ms": 21430,
+      "verdict": "KEEP",
+      "review": {
+        "verdict": "KEEP",
+        "recommendation": "The change mirrors the proven searchV2 pattern, defaults to false, and when disabled returns the identical { template: 'checkout-v1', items } output, so production behaviour is unchanged until the env var is set. Before merge, run the full test suite plus `npx tsc --noEmit` to confirm parseBool actually accepts \"on\" (its implementation is not shown; only \"TRUE\"/\"0\"/undefined are evidenced), and check `git show HEAD~1:test/checkout.test.js` because the patch creates that file from /dev/null while the context lists it as pre-existing. Document the accepted FLAG_NEW_CHECKOUT values for ops so an enablement attempt doesn't silently no-op.",
+        "critical_assumptions": [
+          "parseBool recognizes \"on\" as truthy; only \"TRUE\"->true, \"0\"->false, undefined->default are evidenced by existing tests",
+          "test/checkout.test.js had no pre-existing content that the /dev/null diff overwrites (context lists it as an existing test file)",
+          "The downstream template consumer already supports \"checkout-v2\" (stated as already deployed)",
+          "Enabling per environment means env var change plus process restart, since loadFlags() reads flags once at startup, and that satisfies 'without a deploy'",
+          "All checkoutPage callers pass a full Flags object; renaming _flags to flags is only safe because tsc checks JSDoc types in checked code"
+        ],
+        "material_risks": [
+          "If test/checkout.test.js existed with other tests, the new-file diff silently deletes that coverage (tests would still pass)",
+          "If parseBool is lenient (e.g., treats any non-\"0\" string as true), ops setting FLAG_NEW_CHECKOUT=false/off/empty could unexpectedly enable v2 in production; conversely if \"on\" is unsupported, rollout silently no-ops (safe but confusing)",
+          "Default-off guarantee depends on FLAG_NEW_CHECKOUT being genuinely unset in production environments; any stray value flips v2 on at next restart"
+        ],
+        "falsification_probe": {
+          "description": "Run `npm test && npx tsc --noEmit` (executes test/flags.test.js and test/checkout.test.js, then JSDoc type-check).",
+          "expected_signal": "All tests pass and tsc is clean — confirms parseBool('on') === true and the newCheckout typing is sound; a failing \"on\" assertion or a type error falsifies the flag parsing/wiring."
+        },
+        "confidence": 0.85,
+        "meta": {
+          "review_id": "7b75a4d9-3831-449c-9f2c-309a38066232",
+          "review_mode": "proposal_first",
+          "model": "z-ai/glm-5.3-flash",
+          "phases": 1,
+          "usage": {
+            "prompt_tokens": 1233,
+            "completion_tokens": 3772,
+            "total_tokens": 5005
+          },
+          "latency_ms": 21430
+        }
+      }
+    },
+    {
+      "case_id": "notify-allsettled",
+      "run": 1,
+      "mode": "proposal_first",
+      "model": "z-ai/glm-5.3-flash",
+      "attempts": 1,
+      "retries": [],
+      "ok": true,
+      "usage_all_attempts": {
+        "prompt_tokens": 1526,
+        "completion_tokens": 3819,
+        "total_tokens": 5345
+      },
+      "cost_usd_all_attempts": 0.001197504,
+      "cost_source": "reported",
+      "latency_ms": 68964,
+      "verdict": "MODIFY",
+      "review": {
+        "verdict": "MODIFY",
+        "recommendation": "Promise.allSettled is the right approach: it correctly removes the whole-job retry that re-sends email and push when SMS fails, and it respects the 'keep queue/retry unchanged' constraint. But the patch makes `logger` a required third parameter of `onOrderShipped` while the queue call site is unchanged and not shown; if the queue invokes the handler as `onOrderShipped(channels, payload)`, then `logger` is undefined, and the first failed channel makes `logger.warn` throw a TypeError inside `notifyAll`, rejecting the job and triggering the retries — reintroducing exactly the duplicates this fix targets, and masking the real SMS error. Make the logger optional (`@param {Logger} [logger]`, `logger?.warn(...)` or a no-op default) and add a test that calls `onOrderShipped` with only two arguments plus a failing channel.",
+        "critical_assumptions": [
+          "The unchanged queue passes a logger as the third argument to onOrderShipped; the diff shows no edit to the queue/dispatch code in src/jobs.js that would supply one.",
+          "Channel.send never throws synchronously; `channels.map(c => c.send(...))` would otherwise reject notifyAll before Promise.allSettled runs.",
+          "No other existing callers of notifyAll use the old 3-argument signature (they would crash on logger.warn whenever a channel fails).",
+          "Duplicates originate solely from handler-level retries, not from queue-level at-least-once redelivery (e.g., visibility-timeout requeues of slow jobs)."
+        ],
+        "material_risks": [
+          "With logger undefined at runtime, the failure path (SMS gateway down) throws TypeError inside notifyAll → job rejects → up to 5 retries → email/push still sent 5-6 times; the bug persists exactly in the scenario being fixed while the happy-path tests stay green.",
+          "The thrown TypeError masks the original channel error, so on-call logs show 'Cannot read properties of undefined (reading warn)' instead of the SMS gateway failure.",
+          "If tsc/checkJs treats the handler as a 2-param callback type where it's registered with the queue, the 3-param signature is not assignable and CI type-check fails.",
+          "The `{ failed }` return value is not consumed by the queue; any future caller that rejects on non-empty `failed` would reintroduce whole-job retries."
+        ],
+        "better_alternative": "Keep the allSettled change but declare the logger optional with a no-op default so no queue call-site change is required, and harden the fan-out with `Promise.allSettled(channels.map(c => Promise.resolve().then(() => c.send(userId, message))))` to absorb synchronous throws from send(). This is a strictly smaller, more robust diff than adding a required parameter threaded through the job handler.",
+        "falsification_probe": {
+          "description": "In test/notify.test.js (or a quick node -e script), invoke `onOrderShipped(channels, payload)` with only two arguments where one channel rejects, mirroring how the unchanged queue dispatches jobs; also grep src/jobs.js for the onOrderShipped call site.",
+          "expected_signal": "If the probe rejects with 'TypeError: Cannot read properties of undefined (reading 'warn')' (or tsc flags a required-param/assignability error at the queue call site), the patch is confirmed broken on the real failure path. If it resolves with `{ failed: ['sms'] }` and no throw because a logger is genuinely supplied at the call site, the patch is sound as written."
+        },
+        "confidence": 0.88,
+        "meta": {
+          "review_id": "cbc9c5d3-8357-43ea-8ecb-29c6ef212280",
+          "review_mode": "proposal_first",
+          "model": "z-ai/glm-5.3-flash",
+          "phases": 1,
+          "usage": {
+            "prompt_tokens": 1526,
+            "completion_tokens": 3819,
+            "total_tokens": 5345
+          },
+          "latency_ms": 68964
+        }
+      }
+    },
+    {
+      "case_id": "page-based-pagination",
+      "run": 1,
+      "mode": "proposal_first",
+      "model": "z-ai/glm-5.3-flash",
+      "attempts": 1,
+      "retries": [],
+      "ok": true,
+      "usage_all_attempts": {
+        "prompt_tokens": 856,
+        "completion_tokens": 3410,
+        "total_tokens": 4266
+      },
+      "cost_usd_all_attempts": 0.001026704,
+      "cost_source": "reported",
+      "latency_ms": 44948,
+      "verdict": "MODIFY",
+      "review": {
+        "verdict": "MODIFY",
+        "recommendation": "The approach (page/per_page alongside legacy offset/limit, offset precedence, per_page falling back to limit through clampLimit) is right, but the offset arithmetic is off by one page: `Number(query.page ?? 1) * perPage` yields offset=perPage when no params are given and for ?page=1&per_page=N, so the first N items are skipped. Change to `const page = Number(query.page ?? 1); const offset = query.offset !== undefined ? Number(query.offset) : Math.max(0, page - 1) * (perPage ?? 0);` — the `(page - 1)` factor restores offset 0 for the default/no-param case and for page 1, and `perPage ?? 0` avoids NaN if clampLimit(undefined) is not numeric. Add regression tests: no-params output identical to the legacy implementation, page=1 returns the first per_page items, page=2&per_page=N maps to offset=N, legacy offset/limit unchanged, and both offset+page / page+limit combinations.",
+        "critical_assumptions": [
+          "paginate(items, offset, limit) treats offset as a 0-based item index and limit as a count (inferred from the helper signature, not verifiable from the given snapshot).",
+          "clampLimit(undefined) returns the same numeric default as in the legacy path, so defaults stay consistent once the formula is fixed.",
+          "Query values arrive as strings and Number() coercion of '', non-numeric, and null values matches legacy tolerance.",
+          "No upstream validation rejects unknown query keys, so page/per_page reach listProducts intact.",
+          "When both offset and page are sent, offset silently wins — acceptable but should be documented/tested."
+        ],
+        "material_risks": [
+          "Default responses (no pagination params) shift by perPage items, directly violating the hard constraint that param-less requests must not change.",
+          "?page=1&per_page=N skips the first N items — new mobile clients silently get page 2's data labeled as page 1.",
+          "Non-numeric page (e.g. ?page=abc) makes offset NaN via `NaN * perPage`, a new failure mode if paginate/paginate callers don't guard NaN.",
+          "If clampLimit(undefined) returns undefined rather than a number, the multiplication produces NaN offset even for default requests (0 * undefined = NaN).",
+          "Implicit offset-over-page precedence could surprise clients sending both, changing results relative to what a page-based client expects."
+        ],
+        "falsification_probe": {
+          "description": "Unit test in test/api.test.js: assert listProducts([{id:1},{id:2},{id:3},{id:4}], {page:'1', per_page:'2'}) returns the first two items, and that listProducts(items, {}) returns the identical array the pre-patch implementation returned for no params.",
+          "expected_signal": "With the current patch, page=1 returns items 3–4 (offset = 1*2 = 2) and the no-params call starts at index clampLimit(undefined) instead of 0 — both falsify the patch. After the (page-1) fix, both assertions pass."
+        },
+        "confidence": 0.95,
+        "meta": {
+          "review_id": "01ccdedd-e9b5-4937-8f87-801fd76d4902",
+          "review_mode": "proposal_first",
+          "model": "z-ai/glm-5.3-flash",
+          "phases": 1,
+          "usage": {
+            "prompt_tokens": 856,
+            "completion_tokens": 3410,
+            "total_tokens": 4266
+          },
+          "latency_ms": 44948
+        }
+      }
+    },
+    {
+      "case_id": "refund-ledger-status",
+      "run": 1,
+      "mode": "proposal_first",
+      "model": "z-ai/glm-5.3-flash",
+      "attempts": 1,
+      "retries": [],
+      "ok": true,
+      "usage_all_attempts": {
+        "prompt_tokens": 1399,
+        "completion_tokens": 2545,
+        "total_tokens": 3944
+      },
+      "cost_usd_all_attempts": 0.000830116,
+      "cost_source": "reported",
+      "latency_ms": 39345,
+      "verdict": "MODIFY",
+      "review": {
+        "verdict": "MODIFY",
+        "recommendation": "The ledger direction is correct, but as patched the code violates the hard constraint 'never refund twice': since 'refunded' was removed from OrderStatus and the status never changes on refund, the guard `if (order.status === \"refunded\")` can never fire, so a second refundOrder() call on the same order pays out again. Replace that guard with a ledger check (e.g. `if (ledger.some(e => e.orderId === order.id)) throw ...`) placed before payout, delete the now-invalid status comparison, and add a double-refund test that asserts payout is called exactly once. Also expose an amountCents parameter (defaulting to order.totalCents) so the stated objective of partial refunds is actually reachable, and run tsc --noEmit — the dead comparison should be a TS2367 no-overlap error today.",
+        "critical_assumptions": [
+          "The in-memory ledger array passed by the caller is the authoritative, shared store; the same array instance is used across all refundOrder() calls for an order.",
+          "No other module reads or writes OrderStatus \"refunded\", so removing it from the union breaks nothing outside these two files.",
+          "payout() is synchronous, infallible, and never retried; the ledger append cannot fail after payout succeeds.",
+          "Partial refunds can be added later without changing the RefundEntry schema or the double-refund rule (one payout per orderId)."
+        ],
+        "material_risks": [
+          "Double payout: with the status no longer flipped, the existing guard is dead code; calling refundOrder twice on the same 'paid' order invokes payout twice — direct violation of the hard constraint.",
+          "Type-check gate breaks: `order.status === \"refunded\"` compares against a literal no longer in the OrderStatus union, which tsc --noEmit (TS2367 no-overlap) should reject.",
+          "Objective unmet: amountCents is always order.totalCents; there is no way to record a partial refund despite the ledger schema supporting one.",
+          "Ordering hazard: payout happens before recordRefund; if the append fails or the caller discards the ledger, money has moved with no audit entry (audit-trail gap, albeit unlikely in-memory).",
+          "Downstream consumers keying on a 'refunded' status (reports, shipping rules, admin UI) will now see orders as 'paid'/'shipped' forever after refunding."
+        ],
+        "falsification_probe": {
+          "description": "Add/run a test: create one order { id: 'o1', status: 'paid', totalCents: 500 }, one ledger array, and a payout spy; call refundOrder(order, payoutSpy, ledger, 1000) twice with the same arguments; assert payoutSpy was called once, ledger.length === 1, and the second call throws.",
+          "expected_signal": "With the patch as applied, the second call does NOT throw: payout is invoked twice and ledger has two entries — falsifying the 'never refund twice' constraint. After the ledger-based guard fix, the second call must throw and payout must be called exactly once."
+        },
+        "confidence": 0.92,
+        "meta": {
+          "review_id": "6318f211-8e2a-46de-9141-a075522801f4",
+          "review_mode": "proposal_first",
+          "model": "z-ai/glm-5.3-flash",
+          "phases": 1,
+          "usage": {
+            "prompt_tokens": 1399,
+            "completion_tokens": 2545,
+            "total_tokens": 3944
+          },
+          "latency_ms": 39345
+        }
+      }
+    },
+    {
+      "case_id": "remove-xml-exporter",
+      "run": 1,
+      "mode": "proposal_first",
+      "model": "z-ai/glm-5.3-flash",
+      "attempts": 1,
+      "retries": [],
+      "ok": true,
+      "usage_all_attempts": {
+        "prompt_tokens": 1039,
+        "completion_tokens": 2885,
+        "total_tokens": 3924
+      },
+      "cost_usd_all_attempts": 0.000895076,
+      "cost_source": "reported",
+      "latency_ms": 74148,
+      "verdict": "INSUFFICIENT_EVIDENCE",
+      "review": {
+        "verdict": "INSUFFICIENT_EVIDENCE",
+        "recommendation": "The deletion is the right direction, but the 'no users' claim is unverified against the exact failure mode the constraint forbids: config/report-schedules.json lets scheduled reports select an exporter by name, and the proposal's evidence (web UI options, code references to toXml) does not cover config entries. Run the grep below before finalizing; if clean, the patch as applied is safe to keep. If a schedule or documented API consumer references xml, update that schedule first or ship a stub exporter that throws an explicit deprecation error for one release.",
+        "critical_assumptions": [
+          "config/report-schedules.json contains no schedule with \"format\": \"xml\"",
+          "On-demand reports are only triggered via the web UI; no external API or integration clients request format=xml",
+          "The registry entry really is the only code reference to toXml (nothing in src/scheduler.js or elsewhere imports ./xml.js)",
+          "No user-facing docs or API contract lists xml as a supported export format",
+          "'No users' was determined from code/UI inspection, not assumed from absent telemetry"
+        ],
+        "material_risks": [
+          "A scheduled report configured with format \"xml\" would make getExporter throw at execution time (the retained 'unknown format throws' test confirms throwing behavior), silently breaking that job on its next run — a direct violation of the constraint",
+          "External on-demand consumers passing format=xml would start receiving errors, an untracked breaking contract change invisible to the test suite",
+          "If any module still imports ./xml.js, ESM resolution fails at process startup, breaking the whole reporting service deploy, not just XML output"
+        ],
+        "falsification_probe": {
+          "description": "Post-patch: grep -rniE 'xml|toXml' config src docs README* package.json, focusing on config/report-schedules.json for \"format\": \"xml\" schedule entries and any remaining toXml imports.",
+          "expected_signal": "Any hit — especially a schedule entry with format \"xml\" or a lingering import — falsifies the 'no users' claim and means the deletion breaks an existing report; zero hits confirms the patch is safe to keep as-is."
+        },
+        "confidence": 0.75,
+        "meta": {
+          "review_id": "91161360-ce11-436d-be21-f42c25833ccc",
+          "review_mode": "proposal_first",
+          "model": "z-ai/glm-5.3-flash",
+          "phases": 1,
+          "usage": {
+            "prompt_tokens": 1039,
+            "completion_tokens": 2885,
+            "total_tokens": 3924
+          },
+          "latency_ms": 74148
+        }
+      }
+    },
+    {
+      "case_id": "rename-date-helper",
+      "run": 1,
+      "mode": "proposal_first",
+      "model": "z-ai/glm-5.3-flash",
+      "attempts": 2,
+      "retries": [
+        {
+          "code": "TIMEOUT",
+          "message": "Review exceeded REVIEW_TIMEOUT=120000ms"
+        }
+      ],
+      "ok": true,
+      "usage_all_attempts": {
+        "prompt_tokens": 1263,
+        "completion_tokens": 1905,
+        "total_tokens": 3168
+      },
+      "cost_usd_all_attempts": 0.000639492,
+      "cost_source": "mixed",
+      "latency_ms": 44499,
+      "verdict": "KEEP",
+      "review": {
+        "verdict": "KEEP",
+        "recommendation": "The rename is complete and behavior-preserving: all three callers in the snapshot (src/reports.js, src/invoices.js, src/audit/log.js), the definition in src/dates.js, and the test are updated, and the JSDoc (\"YYYY-MM-DD (UTC)\") still accurately describes the function. The new name is more precise than fmtDate since toISOString().slice(0, 10) yields exactly the UTC ISO date part. Before merging, run a repo-wide grep for the old identifier plus `npx tsc --noEmit` and `node --test` to prove no stale reference survives and types still check under checkJs.",
+        "critical_assumptions": [
+          "The repository snapshot is complete: no other file (barrel/re-export module, index, script, or dynamic import with a string specifier) references fmtDate.",
+          "package.json does not expose src/dates.js via an exports map to any consumer that could import the old name (stated internal, but package.json contents are not shown).",
+          "tsconfig.json enables checkJs/strict resolution so tsc would surface any missed named import (TS2724/TS2305).",
+          "No string-based or computed references to the identifier exist (e.g., obj['fmtDate']), which a plain rename would miss."
+        ],
+        "material_risks": [
+          "A single missed import anywhere would cause a hard crash at module load time (SyntaxError: requested module does not provide an export named 'fmtDate'), breaking every importing module, not just one call site.",
+          "A stale reference outside src/ and test/ (e.g., in package.json scripts, build tooling, or docs) would not be caught by the shown patch and would fail only at runtime or in CI."
+        ],
+        "falsification_probe": {
+          "description": "Run `grep -rn 'fmtDate' src test package.json` followed by `npx tsc --noEmit && node --test` from the repo root.",
+          "expected_signal": "Confirmation: grep returns zero matches, tsc exits 0 with no errors, and all tests pass. Falsification: any grep hit for fmtDate, or a TS2724/TS2305 'has no exported member' error, or a node SyntaxError about the missing export proves a caller was missed."
+        },
+        "confidence": 0.92,
+        "meta": {
+          "review_id": "3a45b4a2-b971-4191-ab1b-736f8fa6cdba",
+          "review_mode": "proposal_first",
+          "model": "z-ai/glm-5.3-flash",
+          "phases": 1,
+          "usage": {
+            "prompt_tokens": 1263,
+            "completion_tokens": 1905,
+            "total_tokens": 3168
+          },
+          "latency_ms": 44499
+        }
+      }
+    },
+    {
+      "case_id": "retry-jitter",
+      "run": 1,
+      "mode": "proposal_first",
+      "model": "z-ai/glm-5.3-flash",
+      "attempts": 1,
+      "retries": [],
+      "ok": true,
+      "usage_all_attempts": {
+        "prompt_tokens": 999,
+        "completion_tokens": 2729,
+        "total_tokens": 3728
+      },
+      "cost_usd_all_attempts": 0.000848036,
+      "cost_source": "reported",
+      "latency_ms": 56372,
+      "verdict": "MODIFY",
+      "review": {
+        "verdict": "MODIFY",
+        "recommendation": "The full-jitter approach is the right fix for synchronized retries, but the diff introduces a serious off-by-one: the loop changed from `i < opts.attempts` to `attempt <= opts.attempts`, so fn is now invoked attempts+1 times, not `attempts` — the claim 'the number of attempts is unchanged' is false. With the provider's 3-attempt cap, every charge that would previously fail after 3 tries now makes a 4th call, directly risking merchant throttling. Fix by reverting the loop condition to `attempt < opts.attempts` and the sleep guard to `attempt < opts.attempts - 1` while keeping the jittered delay. Also add a test asserting fn is called exactly `attempts` times with a captured-delay assertion (0 <= ms <= base*2^attempt) using the new `random` hook.",
+        "critical_assumptions": [
+          "All callers (chargeWithRetry etc.) pass attempts <= 3 and rely on 'attempts' meaning total tries, matching the JSDoc 'at most attempts times in total'",
+          "The provider counts every thrown/failed HTTP call as one of the 3 allowed attempts, so a 4th call triggers throttling",
+          "Existing test/retry.test.js asserts fn invocation count (if it only asserts delays, the off-by-one slips through CI)",
+          "Non-cryptographic Math.random is acceptable for jitter (no security requirement on delay unpredictability)",
+          "No caller depends on the old deterministic backoff timing (e.g., for downstream SLA math or timeouts sized to worst-case delay)"
+        ],
+        "material_risks": [
+          "attempts+1 total calls to the payment provider during brownouts → merchant account throttling, converting a transient outage into a persistent account-level penalty",
+          "Worst-case failure latency grows: one extra attempt plus one extra sleep (up to base*2^(attempts-1) jittered) lengthens the tail before the final error is thrown, potentially exceeding caller-side request timeouts",
+          "If existing tests were updated to expect the new call count rather than failing, the off-by-one becomes encoded as intended behavior",
+          "Full jitter allows delay 0 (random()≈0), so some retries fire immediately; acceptable for desynchronization but worth asserting bounds in tests rather than exact values"
+        ],
+        "better_alternative": "Keep the diff's jitter, hook, and rename, but restore original control flow: `for (let attempt = 0; attempt < opts.attempts; attempt++) { ... if (attempt < opts.attempts - 1) await sleep(Math.round(random() * opts.baseDelayMs * 2 ** attempt)); }`. This preserves exactly `attempts` total calls and attempts-1 sleeps, satisfying the provider cap and the backward-compatibility constraint on behavior as well as signature.",
+        "falsification_probe": {
+          "description": "Run a one-liner against the patched module: node -e \"import('./src/retry.js').then(({retry}) => { let n=0; return retry(() => { n++; throw new Error('x'); }, {attempts:3, baseDelayMs:1, sleep: async () => {}}).catch(() => {}).then(() => console.log('calls:', n)); })\" (or run node --test test/retry.test.js if it asserts call counts).",
+          "expected_signal": "If it prints 'calls: 4', the 'number of attempts is unchanged' claim is falsified and the provider cap is violated; correct behavior (and the pre-patch module) prints 'calls: 3'. A passing existing call-count test after the fix would confirm the corrected semantics."
+        },
+        "confidence": 0.95,
+        "meta": {
+          "review_id": "0fad8f05-a983-45a5-b307-eadc53c26262",
+          "review_mode": "proposal_first",
+          "model": "z-ai/glm-5.3-flash",
+          "phases": 1,
+          "usage": {
+            "prompt_tokens": 999,
+            "completion_tokens": 2729,
+            "total_tokens": 3728
+          },
+          "latency_ms": 56372
+        }
+      }
+    },
+    {
+      "case_id": "slugify-diacritics",
+      "run": 1,
+      "mode": "proposal_first",
+      "model": "z-ai/glm-5.3-flash",
+      "attempts": 1,
+      "retries": [],
+      "ok": true,
+      "usage_all_attempts": {
+        "prompt_tokens": 788,
+        "completion_tokens": 3430,
+        "total_tokens": 4218
+      },
+      "cost_usd_all_attempts": 0.001026592,
+      "cost_source": "reported",
+      "latency_ms": 101789,
+      "verdict": "MODIFY",
+      "review": {
+        "verdict": "MODIFY",
+        "recommendation": "The NFKD + combining-mark strip is the right approach and correctly turns 'Crème brûlée' into 'creme-brulee', but removing the final trim replace is a bug, not a simplification: the character-class replace only collapses interior runs of non-alphanumerics into one dash; it leaves leading/trailing dashes intact (e.g. 'Hello, world!' → 'hello-world-' instead of 'hello-world'). That silently changes URLs for plain-ASCII titles, directly violating the stated constraint. Restore the .replace(/^-+|-+$/g, \"\") step and add tests for punctuation-adjacent titles.",
+        "critical_assumptions": [
+          "No existing article title starts or ends with a non-alphanumeric character (space, punctuation, quotes) — otherwise its public URL changes with this patch.",
+          "All accented letters in real titles decompose under NFKD with marks inside U+0300–U+036F (this excludes ł, đ, ø, ß, æ, which remain dashes).",
+          "NFKD compatibility decompositions mapping to ASCII (ﬁ→fi, ①→1, ™→tm) are acceptable output changes for non-plain-ASCII titles.",
+          "The existing test suite would catch leading/trailing-dash regressions (it evidently does not, since the patch was proposed)."
+        ],
+        "material_risks": [
+          "Plain-ASCII titles with leading/trailing punctuation now generate slugs like 'hello-world-' or '-hi', breaking shared URLs (404s) — direct violation of the hard constraint.",
+          "Whitespace-only or punctuation-only titles now yield slug '-' (previously ''), producing a degenerate route.",
+          "Objective only partially met: Latin letters without combining-mark decompositions (ł, ø, đ, ß) still become dashes, e.g. 'Zażółć' → 'zao-c' rather than 'zazolc'.",
+          "Leading/trailing dashes in URLs may collide or behave unexpectedly in routing/canonicalization and downstream link checks."
+        ],
+        "better_alternative": "Keep the original chain and insert only the two new lines before toLowerCase(): .normalize(\"NFKD\") and .replace(/[\\u0300-\\u036f]/g, \"\"). Optionally add a tiny hand-rolled map for non-decomposable Latin letters (ł→l, ø→o, đ→d, ß→ss, æ→ae) if the blog's audience includes Polish/Nordic/German titles — still no new dependencies.",
+        "falsification_probe": {
+          "description": "Run: node -e \"import('./src/slug.js').then(m=>{console.log(JSON.stringify(m.slugify('Hello, world!')));console.log(JSON.stringify(m.slugify(' ')));})\" and compare against the pre-patch behavior (or add a unit test expect(slugify('Crème brûlée!')).toBe('creme-brulee')).",
+          "expected_signal": "Patched output is 'hello-world-' and '-' (trailing/leading dash present) instead of the original 'hello-world' and '' — this falsifies the claim that output for plain-ASCII titles is unchanged and that the trim was redundant. Restoring the trim makes the test pass with 'creme-brulee'."
+        },
+        "confidence": 0.92,
+        "meta": {
+          "review_id": "f5f873a5-6294-4477-a08d-da6bb1c2ba1f",
+          "review_mode": "proposal_first",
+          "model": "z-ai/glm-5.3-flash",
+          "phases": 1,
+          "usage": {
+            "prompt_tokens": 788,
+            "completion_tokens": 3430,
+            "total_tokens": 4218
+          },
+          "latency_ms": 101789
+        }
+      }
+    }
+  ]
+}

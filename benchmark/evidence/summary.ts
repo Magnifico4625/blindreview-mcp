@@ -4,7 +4,65 @@ import { diff, pct } from "../report.js";
 import { DEFAULT_REPO_CASES_DIR, loadRepoCases } from "./cases.js";
 import { projectVerdict, type CriterionLabel } from "./criteria.js";
 import { compareRepoModes, computeRepoMetrics } from "./metrics.js";
-import type { RepoBenchmarkReport } from "./runner.js";
+import type { RepoBenchmarkReport, RepoRunRecord } from "./runner.js";
+import { isRepoCorrect, isTestableDefect, isUntestableDefect, type RepoCase } from "./cases.js";
+import { wilson } from "../stats.js";
+import type { Artifact } from "../../src/evidence/sandbox.js";
+
+/**
+ * POST-HOC audit (NOT pre-registered; added after seeing that search hits on unchanged lines of the
+ * patched file validated claims on untestable cases). For each case, which artifacts actually
+ * demonstrate the ground-truth defect. A validated claim whose matched artifacts include none of
+ * these is "validated but irrelevant". Correct and untestable cases have no relevant artifact by
+ * construction.
+ */
+export const POSTHOC_RELEVANT: Record<string, (a: Artifact) => boolean> = {
+  "slugify-diacritics": (a) => a.type === "failing_test",
+  "page-based-pagination": (a) => a.type === "failing_test",
+  "retry-jitter": (a) => a.type === "failing_test",
+  "money-object-signature": (a) => a.type === "typecheck_error" || (a.type === "search_hit" && a.file === "src/invoice.js"),
+  "config-field-rename": (a) => a.type === "typecheck_error" || (a.type === "search_hit" && a.file === "src/worker.js"),
+  "refund-ledger-status": (a) => a.type === "typecheck_error" || (a.type === "search_hit" && a.file === "src/refunds.js" && /refunded/.test(a.detail)),
+  "remove-xml-exporter": (a) => a.type === "search_hit" && a.file === "config/report-schedules.json",
+  "drop-legacy-id-column": (a) => a.type === "search_hit" && a.file === "src/reports/partner-export.js",
+};
+
+function audit(cases: RepoCase[], records: RepoRunRecord[]) {
+  const byId = new Map(cases.map((c) => [c.id, c]));
+  const eg = records.filter((r) => r.mode === "evidence_gate" && r.ok && r.evidence);
+  let validated = 0;
+  let relevant = 0;
+  const irrelevant: Record<string, number> = { testable: 0, untestable: 0, correct: 0 };
+  const auditedVerdict = (r: RepoRunRecord): string | undefined => {
+    const g = r.evidence?.gate;
+    if (!g || g.status !== "validated") return r.verdict;
+    const rel = POSTHOC_RELEVANT[r.case_id];
+    const ok = rel ? g.matched.some((m) => rel(m.artifact)) : false;
+    return ok || !(r.verdict === "MODIFY" || r.verdict === "REPLACE") ? r.verdict : "WARNING";
+  };
+  for (const r of eg) {
+    const g = r.evidence?.gate;
+    if (g?.status !== "validated") continue;
+    validated++;
+    const c = byId.get(r.case_id) as RepoCase;
+    const rel = POSTHOC_RELEVANT[r.case_id];
+    if (rel && g.matched.some((m) => rel(m.artifact))) relevant++;
+    else {
+      const group = isRepoCorrect(c) ? "correct" : isUntestableDefect(c) ? "untestable" : "testable";
+      irrelevant[group] = (irrelevant[group] ?? 0) + 1;
+    }
+  }
+  const iv = (v: string | undefined) => v === "MODIFY" || v === "REPLACE";
+  const sel = (f: (c: RepoCase) => boolean) => eg.filter((r) => f(byId.get(r.case_id) as RepoCase));
+  return {
+    validated,
+    relevant,
+    irrelevant,
+    recallTestable: wilson(sel(isTestableDefect).filter((r) => iv(auditedVerdict(r))).length, sel(isTestableDefect).length),
+    recallUntestable: wilson(sel(isUntestableDefect).filter((r) => iv(auditedVerdict(r))).length, sel(isUntestableDefect).length),
+    fi: wilson(sel(isRepoCorrect).filter((r) => iv(auditedVerdict(r))).length, sel(isRepoCorrect).length),
+  };
+}
 
 /**
  * Cross-model summary of v0.4.0 reports + the pre-registered verdict.
@@ -49,6 +107,12 @@ async function main(): Promise<void> {
     const g = m.gate;
     if (!g) continue;
     L.push(`| ${r.model} | ${g.claims} | ${g.claimed_confirmed} | ${g.validated} | ${g.downgraded} (${g.downgraded_on_correct} / ${g.downgraded_on_flawed}) | ${g.forced_on_correct} / ${g.forced_on_flawed} | ${pct(g.ungated_false_intervention)} | ${pct(g.ungated_recall_testable)} | **${m.criterion}** |`);
+  }
+  L.push("", "## POST-HOC evidence relevance audit (not pre-registered)", "", "A validated claim counts as relevant only if a matched artifact actually demonstrates the case's ground-truth defect (failing test / typecheck error / search hit in the file that contradicts the proposal). 'Audited' rates treat interventions validated only by irrelevant artifacts as WARNING.", "", "| model | validated | relevant | validated but irrelevant (testable / untestable / correct) | audited recall testable | audited recall untestable | audited FI |", "|---|---|---|---|---|---|---|");
+  for (const r of reports) {
+    if (!r.modes.includes("evidence_gate")) continue;
+    const a = audit(cases, r.records);
+    L.push(`| ${r.model} | ${a.validated} | ${a.relevant} | ${a.irrelevant.testable} / ${a.irrelevant.untestable} / ${a.irrelevant.correct} | ${pct(a.recallTestable)} | ${pct(a.recallUntestable)} | ${pct(a.fi)} |`);
   }
   L.push("", "## Paired comparisons", "");
   for (const r of reports) {

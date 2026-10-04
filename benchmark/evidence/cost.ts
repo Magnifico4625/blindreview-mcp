@@ -83,7 +83,7 @@ export class SpendLedger {
   constructor(readonly file: string) {}
 
   private read(): number {
-    let text = "";
+    let text: string;
     try {
       text = readFileSync(this.file, "utf8");
     } catch {
