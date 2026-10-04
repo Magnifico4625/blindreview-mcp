@@ -4,7 +4,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { describe, expect, it } from "vitest";
 import { findProjectRoot } from "../src/config.js";
-import { createServer } from "../src/create-server.js";
+import { createServer, SERVER_VERSION } from "../src/create-server.js";
 import { ReviewResultSchema } from "../src/schemas/review.js";
 import { FakeProvider, SENTINEL, allText, makeInput, testConfig, validPosition, validVerdict } from "./helpers.js";
 
@@ -26,6 +26,10 @@ describe("MCP server (in-memory)", () => {
       expect.arrayContaining(["objective", "constraints", "context", "proposed_solution", "decision_type", "risk_level"]),
     );
     expect(review.outputSchema).toBeDefined();
+    expect(review.description).toMatch(/BLINDNESS CONTRACT/);
+    const props = review.inputSchema.properties as Record<string, { description?: string; enum?: string[] }>;
+    for (const f of ["objective", "constraints", "context", "environment", "evidence"]) expect(props[f]!.description).toMatch(/Do NOT put your planned solution/);
+    expect(props.review_mode!.enum).toEqual(["blind_first", "proposal_first"]);
   });
 
   it("runs a blind-first review end to end and returns structured content", async () => {
@@ -76,6 +80,7 @@ describe("MCP server (built, over stdio)", () => {
     try {
       const { tools } = await client.listTools();
       expect(tools.map((t) => t.name)).toContain("review_decision");
+      expect(client.getServerVersion()?.version).toBe(SERVER_VERSION);
     } finally {
       await client.close();
     }

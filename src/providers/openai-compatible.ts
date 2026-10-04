@@ -22,6 +22,8 @@ export interface OpenAICompatibleOptions {
   reasoningEffort?: string | undefined;
   /** Defaults to "reasoning_object" for openrouter.ai, otherwise "reasoning_effort". */
   reasoningParam?: ReasoningParamStyle | undefined;
+  /** Optional sampling temperature (dropped automatically if the model rejects it). */
+  temperature?: number | undefined;
   /** Ask for JSON output via response_format (dropped automatically if unsupported). Default true. */
   jsonMode?: boolean;
   /** Injected for tests. Defaults to global fetch. */
@@ -54,6 +56,7 @@ export function defaultReasoningParam(baseUrl: string): ReasoningParamStyle {
  *  - reasoning_effort / reasoning -> dropped
  *  - max_tokens                   -> switched to max_completion_tokens (newer OpenAI reasoning models)
  *  - response_format              -> dropped (the prompt still demands JSON)
+ *  - temperature                  -> dropped
  * The adapter remembers what was rejected for subsequent calls. The retry loop is bounded.
  * The request never contains `tools`: the reviewer has no tools.
  */
@@ -66,6 +69,7 @@ export class OpenAICompatibleProvider implements ReviewerProvider {
   private readonly headers: Record<string, string>;
   private readonly reasoningParam: ReasoningParamStyle;
   private reasoningEffort: string | undefined;
+  private temperature: number | undefined;
   private jsonMode: boolean;
   private tokenParam: "max_tokens" | "max_completion_tokens" = "max_tokens";
 
@@ -74,6 +78,7 @@ export class OpenAICompatibleProvider implements ReviewerProvider {
     this.apiKey = options.apiKey;
     this.model = options.model;
     this.reasoningEffort = options.reasoningEffort;
+    this.temperature = options.temperature;
     this.reasoningParam = options.reasoningParam ?? defaultReasoningParam(this.baseUrl);
     this.jsonMode = options.jsonMode ?? true;
     this.fetchImpl = options.fetchImpl ?? fetch;
@@ -92,6 +97,7 @@ export class OpenAICompatibleProvider implements ReviewerProvider {
       [this.tokenParam]: request.maxTokens,
     };
     if (this.jsonMode) body.response_format = { type: "json_object" };
+    if (this.temperature !== undefined) body.temperature = this.temperature;
     if (this.reasoningEffort) {
       if (this.reasoningParam === "reasoning_object") body.reasoning = { effort: this.reasoningEffort, exclude: true };
       else body.reasoning_effort = this.reasoningEffort;
@@ -100,8 +106,8 @@ export class OpenAICompatibleProvider implements ReviewerProvider {
   }
 
   async complete(request: CompletionRequest): Promise<CompletionResponse> {
-    // Each fallback fires at most once, so this is bounded at 4 attempts.
-    for (let attempt = 0; attempt < 4; attempt++) {
+    // Each fallback fires at most once, so this is bounded at 5 attempts.
+    for (let attempt = 0; attempt < 5; attempt++) {
       const response = await this.post(this.buildBody(request), request.signal);
       if (response.ok) return this.parse(await this.readJson(response, request.signal), request);
 
@@ -117,6 +123,10 @@ export class OpenAICompatibleProvider implements ReviewerProvider {
     const t = errorText.toLowerCase();
     if (this.reasoningEffort && t.includes("reasoning")) {
       this.reasoningEffort = undefined;
+      return true;
+    }
+    if (this.temperature !== undefined && t.includes("temperature")) {
+      this.temperature = undefined;
       return true;
     }
     if (this.tokenParam === "max_tokens" && t.includes("max_completion_tokens")) {
@@ -182,6 +192,7 @@ export class OpenAICompatibleProvider implements ReviewerProvider {
     return {
       content,
       toolCallCount,
+      finishReason: typeof choice.finish_reason === "string" ? choice.finish_reason : undefined,
       model: typeof body.model === "string" && body.model ? body.model : this.model,
       usage: normalizeUsage(body.usage, request, content),
     };

@@ -23,9 +23,10 @@ export interface ModeOutcome {
  * Phase 2: same session. Messages = Phase 1 messages + Phase 1 answer + reveal of the proposal.
  * The Phase 1 position is internal and never returned.
  *
- * Budget policy: if Phase 1 leaves too little budget for Phase 2, Phase 2 is skipped and the
- * review returns INSUFFICIENT_EVIDENCE with meta.budget_exhausted=true (confidence 0). If the
- * budget is exhausted before/inside Phase 1, a BUDGET_EXCEEDED error is raised instead.
+ * Budget policy: if, after Phase 1, cumulative usage has reached MAX_REVIEW_TOKENS or the remaining
+ * budget is too small for Phase 2, Phase 2 is skipped and the review returns INSUFFICIENT_EVIDENCE
+ * with meta.budget_exhausted=true (confidence 0). If the budget runs out before/inside Phase 1
+ * (including its repair retry), a BUDGET_EXCEEDED error is raised instead.
  */
 export async function runBlindFirst(session: ReviewSession, input: ReviewInput): Promise<ModeOutcome> {
   const phase1Messages = buildBlindPhase1Messages(toBlindInput(input));
@@ -50,7 +51,7 @@ export async function runBlindFirst(session: ReviewSession, input: ReviewInput):
   return { verdict, phases: 2 };
 }
 
-function budgetExhaustedVerdict(): ReviewVerdict {
+export function budgetExhaustedVerdict(): ReviewVerdict {
   return {
     verdict: "INSUFFICIENT_EVIDENCE",
     recommendation:

@@ -14,6 +14,9 @@ export const DECISION_TYPES = [
 ] as const;
 export const RISK_LEVELS = ["low", "medium", "high", "critical"] as const;
 export const REVIEW_MODES = ["blind_first", "proposal_first"] as const;
+/** Benchmark-only compute-matched control. Not accepted by the MCP tool input. */
+export const BENCHMARK_ONLY_MODES = ["proposal_first_2pass"] as const;
+export const ALL_MODES = [...REVIEW_MODES, ...BENCHMARK_ONLY_MODES] as const;
 export const VERDICTS = ["KEEP", "MODIFY", "REPLACE", "INSUFFICIENT_EVIDENCE"] as const;
 
 export const DecisionTypeSchema = z.enum(DECISION_TYPES);
@@ -24,28 +27,35 @@ export const VerdictSchema = z.enum(VERDICTS);
 export type DecisionType = z.infer<typeof DecisionTypeSchema>;
 export type RiskLevel = z.infer<typeof RiskLevelSchema>;
 export type ReviewMode = z.infer<typeof ReviewModeSchema>;
+export type AnyMode = (typeof ALL_MODES)[number];
 export type Verdict = z.infer<typeof VerdictSchema>;
 
 const MAX_TEXT = 60_000;
 
+const NO_PLAN = "Describe the problem only. Do NOT put your planned solution, preferred approach or its wording here; it belongs in proposed_solution only (the blind phase must not see it).";
+
 /** Raw shape of the review_decision tool input (used directly by the MCP SDK). */
 export const reviewInputShape = {
-  objective: z.string().min(1).max(4_000).describe("What the main agent is trying to achieve."),
+  objective: z
+    .string()
+    .min(1)
+    .max(4_000)
+    .describe(`The goal / problem to solve, not the solution. ${NO_PLAN}`),
   constraints: z
     .array(z.string().min(1).max(2_000))
     .max(50)
-    .describe("Hard constraints: compatibility, SLAs, deadlines, forbidden approaches, etc."),
+    .describe(`Hard requirements: compatibility, SLAs, deadlines, forbidden approaches. ${NO_PLAN}`),
   context: z
     .string()
     .max(MAX_TEXT)
-    .describe("Relevant facts about the codebase/system. Summaries and key snippets, not whole repos."),
+    .describe(`Relevant facts about the codebase/system (summaries and key snippets). ${NO_PLAN}`),
   proposed_solution: z
     .string()
     .min(1)
     .max(MAX_TEXT)
-    .describe("The main agent's proposed solution. Hidden from the reviewer until phase 2 in blind_first mode."),
-  decision_type: DecisionTypeSchema,
-  risk_level: RiskLevelSchema,
+    .describe("Your proposed solution. The ONLY field that may describe it. Hidden from the reviewer until phase 2 in blind_first mode."),
+  decision_type: DecisionTypeSchema.describe("Visible to the blind phase by design."),
+  risk_level: RiskLevelSchema.describe("Visible to the blind phase by design."),
   review_mode: ReviewModeSchema.optional().describe(
     "blind_first (default): reviewer forms an independent position before seeing the proposal. proposal_first: control mode, plain critique.",
   ),
@@ -53,12 +63,12 @@ export const reviewInputShape = {
     .string()
     .max(8_000)
     .optional()
-    .describe("Runtime/deploy environment: versions, topology, scale, traffic."),
+    .describe(`Runtime/deploy environment: versions, topology, scale, traffic. ${NO_PLAN}`),
   evidence: z
     .array(z.string().min(1).max(8_000))
     .max(30)
     .optional()
-    .describe("Observed facts: logs, error messages, benchmark numbers, test output."),
+    .describe(`Observed facts: logs, error messages, benchmark numbers, test output. ${NO_PLAN}`),
 };
 
 export const ReviewInputSchema = z.object(reviewInputShape).strict();
@@ -136,12 +146,13 @@ export type Usage = z.infer<typeof UsageSchema>;
 
 export const ReviewMetaSchema = z.object({
   review_id: z.string(),
-  review_mode: ReviewModeSchema,
+  review_mode: z.enum(ALL_MODES),
   model: z.string(),
   phases: z.number().int().min(1).max(2),
   usage: UsageSchema,
   latency_ms: z.number().nonnegative(),
   budget_exhausted: z.boolean().optional(),
+  blindness_warning: z.string().optional(),
 });
 export type ReviewMeta = z.infer<typeof ReviewMetaSchema>;
 
@@ -160,7 +171,9 @@ export const ERROR_CODES = [
   "TIMEOUT",
   "MALFORMED_RESPONSE",
   "BUDGET_EXCEEDED",
-  "RECURSION_BLOCKED",
+  "OUTPUT_TRUNCATED",
+  "BLINDNESS_LEAK",
+  "INTERNAL_ERROR",
 ] as const;
 export type ReviewErrorCode = (typeof ERROR_CODES)[number];
 

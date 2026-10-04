@@ -71,34 +71,86 @@ describe("proposal_first (control)", () => {
   });
 });
 
-describe("recursion guard", () => {
-  it("blocks a nested review_decision started from inside a review", async () => {
-    let nestedError: unknown;
-    const holder: { r?: Reviewer } = {};
-    const provider = new FakeProvider(async (_req, i) => {
-      if (i === 0) {
-        try {
-          await holder.r!.review(makeInput());
-        } catch (e) {
-          nestedError = e;
-        }
-      }
-      return JSON.stringify(i === 0 ? validPosition : validVerdict);
-    });
-    holder.r = reviewer(provider);
-    const result = await holder.r.review(makeInput());
-    expect(result.verdict).toBe("MODIFY");
-    expect(nestedError).toBeInstanceOf(ReviewError);
-    expect((nestedError as ReviewError).code).toBe("RECURSION_BLOCKED");
-    expect(provider.requests).toHaveLength(2); // the nested review made no provider call
+describe("single reviewer, no recursion (structural)", () => {
+  it("requests carry only messages/maxTokens/signal: no tools can be given to the reviewer", async () => {
+    const provider = FakeProvider.sequence(validPosition, validVerdict);
+    await reviewer(provider).review(makeInput());
+    for (const req of provider.requests) expect(Object.keys(req).sort()).toEqual(["maxTokens", "messages", "signal"]);
   });
 
-  it("allows independent sequential and concurrent top-level reviews", async () => {
+  it("independent sequential and concurrent top-level reviews work", async () => {
     const provider = new FakeProvider((req) => JSON.stringify(req.messages.length > 2 ? validVerdict : validPosition));
     const r = reviewer(provider);
     await r.review(makeInput());
     const both = await Promise.all([r.review(makeInput()), r.review(makeInput())]);
     expect(both.map((b) => b.verdict)).toEqual(["MODIFY", "MODIFY"]);
+  });
+});
+
+describe("benchmark-only proposal_first_2pass", () => {
+  it("shows the proposal in pass 1 and appends pass-1 output + verdict request in pass 2", async () => {
+    const provider = FakeProvider.sequence(validPosition, validVerdict);
+    const result = await reviewer(provider).review(makeInput({ review_mode: "proposal_first" }), { benchmarkMode: "proposal_first_2pass" });
+    const [p1, p2] = provider.requests;
+    expect(allText(p1!)).toContain(SENTINEL);
+    expect(allText(p1!)).toContain("main_assumptions");
+    expect(p2!.messages.slice(0, p1!.messages.length)).toEqual(p1!.messages);
+    expect(p2!.messages.at(-1)!.content).toContain('"verdict"');
+    expect(result.meta).toMatchObject({ review_mode: "proposal_first_2pass", phases: 2 });
+  });
+
+  it("is not accepted through the public input field", async () => {
+    const provider = FakeProvider.sequence(validVerdict);
+    await expectCode(reviewer(provider).review({ ...makeInput(), review_mode: "proposal_first_2pass" }), "INVALID_INPUT");
+  });
+});
+
+describe("blindness contract", () => {
+  const plan =
+    "Use versioned cache keys that are bumped by a Kafka consumer on every permission change event, keep a two minute TTL as backstop";
+
+  it("refuses blind_first with BLINDNESS_LEAK when the plan is copied into context (no provider call)", async () => {
+    const provider = FakeProvider.sequence(validPosition, validVerdict);
+    const input = makeInput({ proposed_solution: plan, context: `12 pods. We are thinking to ${plan}.` });
+    await expectCode(reviewer(provider).review(input), "BLINDNESS_LEAK");
+    expect(provider.requests).toHaveLength(0);
+  });
+
+  it("detects a leak in objective/constraints/evidence/environment too", async () => {
+    for (const field of ["objective", "environment"] as const) {
+      const provider = FakeProvider.sequence(validPosition, validVerdict);
+      await expectCode(reviewer(provider).review(makeInput({ proposed_solution: plan, [field]: plan })), "BLINDNESS_LEAK");
+    }
+    const provider = FakeProvider.sequence(validPosition, validVerdict);
+    await expectCode(reviewer(provider).review(makeInput({ proposed_solution: plan, evidence: [plan] })), "BLINDNESS_LEAK");
+  });
+
+  it("warns (but runs) on partial overlap; proposal_first only warns", async () => {
+    const partialContext = "Redis available. Idea: use versioned cache keys that are bumped by a Kafka consumer.";
+    const provider = FakeProvider.sequence(validPosition, validVerdict);
+    const result = await reviewer(provider).review(makeInput({ proposed_solution: plan, context: partialContext }));
+    expect(result.meta.blindness_warning).toMatch(/5-word phrases/);
+
+    const p2 = FakeProvider.sequence(validVerdict);
+    const r2 = await reviewer(p2).review(makeInput({ proposed_solution: plan, context: plan, review_mode: "proposal_first" }));
+    expect(r2.meta.blindness_warning).toBeDefined();
+  });
+
+  it("no warning when fields only share domain vocabulary", async () => {
+    const provider = FakeProvider.sequence(validPosition, validVerdict);
+    const result = await reviewer(provider).review(
+      makeInput({ proposed_solution: plan, context: "Kafka topic permission-events exists. Redis cluster for sessions. 12 pods." }),
+    );
+    expect(result.meta.blindness_warning).toBeUndefined();
+  });
+
+  it("respects a configured threshold", async () => {
+    const provider = FakeProvider.sequence(validPosition, validVerdict);
+    const partialContext = "Idea: use versioned cache keys that are bumped by a Kafka consumer.";
+    await expectCode(
+      reviewer(provider, { blindnessLeakThreshold: 0.1, blindnessWarnThreshold: 0.05 }).review(makeInput({ proposed_solution: plan, context: partialContext })),
+      "BLINDNESS_LEAK",
+    );
   });
 });
 
@@ -135,7 +187,7 @@ describe("parsing and repair", () => {
     expect(provider.requests).toHaveLength(2);
   });
 
-  it("never executes tool calls and rejects answers that exceed MAX_TOOL_CALLS", async () => {
+  it("never executes tool calls; answers containing tool calls are unusable", async () => {
     const provider = new FakeProvider(() => ({ content: "", toolCallCount: 1 }));
     await expectCode(reviewer(provider).review(makeInput()), "MALFORMED_RESPONSE");
     expect(provider.requests).toHaveLength(2);
@@ -174,7 +226,57 @@ describe("timeout", () => {
   });
 });
 
+describe("truncation", () => {
+  it("finish_reason=length with unparsable output -> OUTPUT_TRUNCATED, no repair retry", async () => {
+    const provider = new FakeProvider(() => ({ content: '{"main_assumptions": ["a", "b', finishReason: "length" }));
+    await expectCode(reviewer(provider).review(makeInput()), "OUTPUT_TRUNCATED");
+    expect(provider.requests).toHaveLength(1);
+  });
+
+  it("finish_reason=length but valid JSON is accepted", async () => {
+    const provider = new FakeProvider((_r, i) => ({ content: JSON.stringify(i === 0 ? validPosition : validVerdict), finishReason: "length" }));
+    const result = await reviewer(provider).review(makeInput());
+    expect(result.verdict).toBe("MODIFY");
+  });
+});
+
+describe("internal errors", () => {
+  it("maps non-ReviewError exceptions to INTERNAL_ERROR", async () => {
+    const provider = new FakeProvider(() => {
+      throw new TypeError("boom");
+    });
+    await expectCode(reviewer(provider).review(makeInput()), "INTERNAL_ERROR");
+  });
+});
+
 describe("token budget", () => {
+  it("skips phase 2 when reported usage after phase 1 already reached the cap", async () => {
+    const provider = new FakeProvider(() => ({
+      content: JSON.stringify(validPosition),
+      usage: { prompt_tokens: 1500, completion_tokens: 600, total_tokens: 2100 },
+    }));
+    // per-call clamp lets phase 1 run (budget 2000 > estimate), reported usage overshoots the cap
+    const result = await reviewer(provider, { maxReviewTokens: 2000, maxTokensPerCall: 1000 }).review(makeInput());
+    expect(provider.requests).toHaveLength(1);
+    expect(result.meta.budget_exhausted).toBe(true);
+    expect(result.verdict).toBe("INSUFFICIENT_EVIDENCE");
+  });
+
+  it("does not attempt a repair retry once the budget is spent", async () => {
+    const provider = new FakeProvider(() => ({ content: "nope", usage: { prompt_tokens: 2000, completion_tokens: 900, total_tokens: 2900 } }));
+    await expectCode(reviewer(provider, { maxReviewTokens: 3000 }).review(makeInput()), "BUDGET_EXCEEDED");
+    expect(provider.requests).toHaveLength(1);
+  });
+
+  it("phase 2 max_tokens is clamped to what is left", async () => {
+    const provider = new FakeProvider((_r, i) => ({
+      content: JSON.stringify(i === 0 ? validPosition : validVerdict),
+      usage: { prompt_tokens: 1000, completion_tokens: 1000, total_tokens: 2000 },
+    }));
+    await reviewer(provider, { maxReviewTokens: 4000, maxTokensPerCall: 4000 }).review(makeInput());
+    expect(provider.requests[1]!.maxTokens).toBeLessThan(2000);
+  });
+
   it("clamps max_tokens to the remaining budget", async () => {
     const provider = FakeProvider.sequence(validPosition, validVerdict);
     await reviewer(provider, { maxReviewTokens: 3000, maxTokensPerCall: 4000 }).review(makeInput());

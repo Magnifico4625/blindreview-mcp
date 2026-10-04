@@ -119,6 +119,36 @@ ${VERDICT_FORMAT}`,
   ];
 }
 
+/**
+ * BENCHMARK-ONLY compute-matched control (proposal_first_2pass): same two-pass structure and
+ * budget as blind_first, but the proposal is visible from the first pass. Isolates
+ * "blindness" from "the reviewer simply thought more".
+ */
+export function buildProposalFirst2PassMessages(input: ReviewInput): ChatMessage[] {
+  const [system, user] = buildProposalFirstMessages(input) as [ChatMessage, ChatMessage];
+  return [
+    { role: "system", content: `${system.content}\nThis is pass 1 of 2. Do not give a verdict yet.` },
+    {
+      role: "user",
+      content: user.content.replace(
+        /## Your task[\s\S]*$/,
+        `## Your task\nBefore judging the proposal, map the problem space: list the key assumptions, several genuinely different solution directions (the proposal may be one of them), typical failure modes, the direction you would prefer, and assumptions to test.\n\n${POSITION_FORMAT}`,
+      ),
+    },
+  ];
+}
+
+export function buildPass2VerdictMessage(): ChatMessage {
+  return {
+    role: "user",
+    content: `Pass 2: now judge the proposed solution against the problem map you produced above.
+- Check it against each failure mode and assumption you listed.
+- Do not invent objections. KEEP is a valid verdict.
+
+${VERDICT_FORMAT}`,
+  };
+}
+
 export function buildRepairMessage(problem: string): ChatMessage {
   return {
     role: "user",

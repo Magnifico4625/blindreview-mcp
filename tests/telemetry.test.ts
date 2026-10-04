@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -43,6 +43,13 @@ describe("telemetry", () => {
     const rows = await telemetry.readAll();
     expect(rows[0]).toMatchObject({ type: "review", status: "error", error_code: "MALFORMED_RESPONSE" });
     expect(rows[1]).toMatchObject({ type: "outcome", review_id: "abc", accepted_review: true, later_rework_required: false, review_was_useful: true });
+  });
+
+  it("readAll skips corrupt lines", async () => {
+    const file = path.join(await tmp(), "c.jsonl");
+    await writeFile(file, '{"type":"review","id":"a"}\r\n{broken\n\n[1,2]\n{"type":"outcome","review_id":"a"}\n', "utf8");
+    const rows = await new Telemetry(true, file).readAll();
+    expect(rows.map((r) => r.type)).toEqual(["review", "outcome"]);
   });
 
   it("writes nothing when disabled (default)", async () => {

@@ -1,6 +1,6 @@
 {
   "name": "blindreview-mcp",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "BlindReview MCP: one independent, blind-first reviewer for expensive decisions of AI coding agents.",
   "type": "module",
   "license": "MIT",
@@ -38,7 +38,7 @@
     "test": "vitest run",
     "start": "node dist/src/server.js",
     "prebenchmark": "npm run build",
-    "benchmark": "node dist/benchmark/runner.js",
+    "benchmark": "node dist/benchmark/cli.js",
     "outcome": "node dist/src/cli/outcome.js",
     "check": "npm run lint && npm run typecheck && npm test"
   },

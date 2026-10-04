@@ -43,10 +43,12 @@ export const testConfig: Config = {
   model: "fake-model",
   reasoningEffort: undefined,
   reasoningParam: undefined,
+  temperature: undefined,
   maxTokensPerCall: 2000,
   maxReviewTokens: 20000,
-  maxToolCalls: 0,
   timeoutMs: 5000,
+  blindnessLeakThreshold: 0.5,
+  blindnessWarnThreshold: 0.15,
   telemetryEnabled: false,
   telemetryPath: "unused.jsonl",
 };
@@ -77,6 +79,7 @@ export class FakeProvider implements ReviewerProvider {
       usage: partial.usage ?? { prompt_tokens: 100, completion_tokens: 50, total_tokens: 150 },
       toolCallCount: partial.toolCallCount ?? 0,
       model: partial.model ?? this.model,
+      finishReason: partial.finishReason,
     };
   }
 }

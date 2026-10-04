@@ -11,3 +11,4 @@ benchmark-results/*
 *.log
 .DS_Store
 Thumbs.db
+.tmp-env-*/

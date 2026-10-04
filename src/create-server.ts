@@ -1,16 +1,16 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
-import type { Config } from "./config.js";
+import { packageVersion, type Config } from "./config.js";
 import { evaluateGate, gateInputShape, gateResultShape } from "./gate/decision-gate.js";
 import { OpenAICompatibleProvider } from "./providers/openai-compatible.js";
 import type { ReviewerProvider } from "./providers/provider.js";
 import { Reviewer } from "./reviewer/reviewer.js";
-import { OutcomeInputSchema, ReviewError, reviewInputShape, reviewResultShape } from "./schemas/review.js";
+import { OutcomeInputSchema, ReviewError, reviewInputShape, reviewResultShape, type ReviewErrorCode } from "./schemas/review.js";
 import { Telemetry } from "./telemetry/telemetry.js";
 
 export const SERVER_NAME = "blindreview-mcp";
-export const SERVER_VERSION = "0.1.0";
+export const SERVER_VERSION = packageVersion();
 
 export interface ServerDeps {
   config: Config;
@@ -26,6 +26,7 @@ export function buildProvider(config: Config): ReviewerProvider {
     model: config.model,
     reasoningEffort: config.reasoningEffort,
     reasoningParam: config.reasoningParam,
+    temperature: config.temperature,
   });
 }
 
@@ -34,14 +35,15 @@ export function buildReviewer(config: Config, provider?: ReviewerProvider, telem
     provider: provider ?? buildProvider(config),
     maxTokensPerCall: config.maxTokensPerCall,
     maxReviewTokens: config.maxReviewTokens,
-    maxToolCalls: config.maxToolCalls,
     timeoutMs: config.timeoutMs,
+    blindnessLeakThreshold: config.blindnessLeakThreshold,
+    blindnessWarnThreshold: config.blindnessWarnThreshold,
     telemetry,
   });
 }
 
 function errorResult(err: unknown): CallToolResult {
-  const code = err instanceof ReviewError ? err.code : "INTERNAL_ERROR";
+  const code: ReviewErrorCode = err instanceof ReviewError ? err.code : "INTERNAL_ERROR";
   const message = err instanceof Error ? err.message : String(err);
   return { isError: true, content: [{ type: "text", text: JSON.stringify({ error: { code, message } }) }] };
 }
@@ -50,7 +52,8 @@ function jsonResult(value: Record<string, unknown>): CallToolResult {
   return { content: [{ type: "text", text: JSON.stringify(value, null, 2) }], structuredContent: value };
 }
 
-const REVIEW_DESCRIPTION = `Get ONE independent external review before an expensive decision (architecture, DB schema/migration, public API, key dependency, large refactor, security/performance, multi-hypothesis debugging). Default blind_first: the reviewer first solves the problem WITHOUT seeing proposed_solution, then the proposal is revealed and compared. Returns a compact verdict (KEEP | MODIFY | REPLACE | INSUFFICIENT_EVIDENCE), risks, an optional better alternative and the cheapest falsification probe to run. Costs one or two LLM calls; skip it for trivial changes (see should_review).`;
+const REVIEW_DESCRIPTION = `Get ONE independent external review before an expensive decision (architecture, DB schema/migration, public API, key dependency, large refactor, security/performance, multi-hypothesis debugging). Default blind_first: the reviewer first solves the problem WITHOUT seeing proposed_solution, then the proposal is revealed and compared. Returns a compact verdict (KEEP | MODIFY | REPLACE | INSUFFICIENT_EVIDENCE), risks, an optional better alternative and the cheapest falsification probe to run. Costs one or two LLM calls; skip it for trivial changes (see should_review).
+BLINDNESS CONTRACT: describe the problem in objective/constraints/context/environment/evidence and put your plan ONLY in proposed_solution. Do not mention, hint at or paraphrase your planned solution in the other fields. decision_type and risk_level are visible to the blind phase. If proposed_solution is largely copied into the other fields, blind_first refuses with BLINDNESS_LEAK.`;
 
 export function createServer(deps: ServerDeps): McpServer {
   const telemetry = deps.telemetry ?? new Telemetry(deps.config.telemetryEnabled, deps.config.telemetryPath);

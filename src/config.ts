@@ -8,10 +8,15 @@ export interface Config {
   model: string;
   reasoningEffort: string | undefined;
   reasoningParam: "reasoning_effort" | "reasoning_object" | undefined;
+  /** Optional sampling temperature; not sent when undefined. */
+  temperature: number | undefined;
   maxTokensPerCall: number;
   maxReviewTokens: number;
-  maxToolCalls: number;
   timeoutMs: number;
+  /** Containment of proposal word 5-grams in the blind fields above which blind_first refuses. */
+  blindnessLeakThreshold: number;
+  /** Above this, a blindness_warning is attached to meta. */
+  blindnessWarnThreshold: number;
   telemetryEnabled: boolean;
   telemetryPath: string;
 }
@@ -21,8 +26,9 @@ export const DEFAULTS = {
   model: "gpt-5-mini",
   maxTokensPerCall: 4000,
   maxReviewTokens: 20000,
-  maxToolCalls: 0,
   timeoutMs: 120_000,
+  blindnessLeakThreshold: 0.5,
+  blindnessWarnThreshold: 0.15,
   telemetryPath: path.join("data", "reviews.jsonl"),
 } as const;
 
@@ -45,13 +51,26 @@ export function findProjectRoot(start: string = path.dirname(fileURLToPath(impor
   }
 }
 
+/** Version from our package.json (single source of truth). */
+export function packageVersion(): string {
+  try {
+    const pkg = JSON.parse(readFileSync(path.join(findProjectRoot(), "package.json"), "utf8")) as { version?: string };
+    return pkg.version ?? "0.0.0";
+  } catch {
+    return "0.0.0";
+  }
+}
+
 /**
  * Load .env without dependencies. Existing process.env values win (so values passed by the
- * MCP client config override the file). Looks at BLINDREVIEW_ENV_FILE, then <project root>/.env.
- * MCP clients often launch servers with an unrelated cwd (e.g. C:\Windows\System32), so cwd is not used.
+ * MCP client config override the file). Uses BLINDREVIEW_ENV_FILE (relative paths resolve
+ * against the project root) or <project root>/.env. MCP clients often launch servers with an
+ * unrelated cwd (e.g. C:\Windows\System32), so cwd is never used.
  */
 export function loadDotEnv(env: NodeJS.ProcessEnv = process.env): string | undefined {
-  const candidate = env.BLINDREVIEW_ENV_FILE ?? path.join(findProjectRoot(), ".env");
+  const root = findProjectRoot();
+  const configured = env.BLINDREVIEW_ENV_FILE?.trim();
+  const candidate = configured ? (path.isAbsolute(configured) ? configured : path.join(root, configured)) : path.join(root, ".env");
   if (!existsSync(candidate)) return undefined;
   const parsed = parseDotEnv(readFileSync(candidate, "utf8"));
   for (const [key, value] of Object.entries(parsed)) {
@@ -92,28 +111,39 @@ function intFrom(env: NodeJS.ProcessEnv, key: string, fallback: number, min = 0)
   return n;
 }
 
+function numberFrom(env: NodeJS.ProcessEnv, key: string, min: number, max: number): number | undefined {
+  const raw = env[key]?.trim();
+  if (!raw) return undefined;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < min || n > max) {
+    throw new Error(`Invalid ${key}=${JSON.stringify(raw)}: expected a number in [${min}, ${max}]`);
+  }
+  return n;
+}
+
+const TRUE = ["1", "true", "yes", "on"];
+const FALSE = ["0", "false", "no", "off"];
+
 function boolFrom(env: NodeJS.ProcessEnv, key: string, fallback: boolean): boolean {
   const raw = env[key]?.trim().toLowerCase();
   if (!raw) return fallback;
-  return ["1", "true", "yes", "on"].includes(raw);
+  if (TRUE.includes(raw)) return true;
+  if (FALSE.includes(raw)) return false;
+  throw new Error(`Invalid ${key}=${JSON.stringify(env[key])}: expected true/false (also 1/0, yes/no, on/off)`);
 }
 
-export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
-  const telemetryRaw = env.TELEMETRY_PATH?.trim() || DEFAULTS.telemetryPath;
-  const telemetryPath = path.isAbsolute(telemetryRaw) ? telemetryRaw : path.join(findProjectRoot(), telemetryRaw);
-  return {
-    baseUrl: (env.REVIEWER_BASE_URL?.trim() || DEFAULTS.baseUrl).replace(/\/+$/, ""),
-    apiKey: env.REVIEWER_API_KEY?.trim() || undefined,
-    model: env.REVIEWER_MODEL?.trim() || DEFAULTS.model,
-    reasoningEffort: env.REVIEWER_REASONING_EFFORT?.trim() || undefined,
-    reasoningParam: reasoningParamFrom(env.REVIEWER_REASONING_PARAM),
-    maxTokensPerCall: intFrom(env, "REVIEWER_MAX_TOKENS", DEFAULTS.maxTokensPerCall, 1),
-    maxReviewTokens: intFrom(env, "MAX_REVIEW_TOKENS", DEFAULTS.maxReviewTokens, 1),
-    maxToolCalls: intFrom(env, "MAX_TOOL_CALLS", DEFAULTS.maxToolCalls, 0),
-    timeoutMs: intFrom(env, "REVIEW_TIMEOUT", DEFAULTS.timeoutMs, 1),
-    telemetryEnabled: boolFrom(env, "TELEMETRY_ENABLED", false),
-    telemetryPath,
-  };
+function baseUrlFrom(env: NodeJS.ProcessEnv): string {
+  const raw = env.REVIEWER_BASE_URL?.trim() || DEFAULTS.baseUrl;
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new Error(`Invalid REVIEWER_BASE_URL=${JSON.stringify(raw)}: expected an absolute http(s) URL such as https://api.openai.com/v1`);
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error(`Invalid REVIEWER_BASE_URL=${JSON.stringify(raw)}: protocol must be http or https`);
+  }
+  return raw.replace(/\/+$/, "");
 }
 
 function reasoningParamFrom(raw: string | undefined): Config["reasoningParam"] {
@@ -121,4 +151,26 @@ function reasoningParamFrom(raw: string | undefined): Config["reasoningParam"] {
   if (!v) return undefined;
   if (v === "reasoning_effort" || v === "reasoning_object") return v;
   throw new Error(`Invalid REVIEWER_REASONING_PARAM=${JSON.stringify(v)}: expected reasoning_effort or reasoning_object`);
+}
+
+export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
+  const telemetryRaw = env.TELEMETRY_PATH?.trim() || DEFAULTS.telemetryPath;
+  const telemetryPath = path.isAbsolute(telemetryRaw) ? telemetryRaw : path.join(findProjectRoot(), telemetryRaw);
+  const leak = numberFrom(env, "BLINDNESS_LEAK_THRESHOLD", 0, 1) ?? DEFAULTS.blindnessLeakThreshold;
+  const warn = Math.min(numberFrom(env, "BLINDNESS_WARN_THRESHOLD", 0, 1) ?? DEFAULTS.blindnessWarnThreshold, leak);
+  return {
+    baseUrl: baseUrlFrom(env),
+    apiKey: env.REVIEWER_API_KEY?.trim() || undefined,
+    model: env.REVIEWER_MODEL?.trim() || DEFAULTS.model,
+    reasoningEffort: env.REVIEWER_REASONING_EFFORT?.trim() || undefined,
+    reasoningParam: reasoningParamFrom(env.REVIEWER_REASONING_PARAM),
+    temperature: numberFrom(env, "REVIEWER_TEMPERATURE", 0, 2),
+    maxTokensPerCall: intFrom(env, "REVIEWER_MAX_TOKENS", DEFAULTS.maxTokensPerCall, 1),
+    maxReviewTokens: intFrom(env, "MAX_REVIEW_TOKENS", DEFAULTS.maxReviewTokens, 1),
+    timeoutMs: intFrom(env, "REVIEW_TIMEOUT", DEFAULTS.timeoutMs, 1),
+    blindnessLeakThreshold: leak,
+    blindnessWarnThreshold: warn,
+    telemetryEnabled: boolFrom(env, "TELEMETRY_ENABLED", false),
+    telemetryPath,
+  };
 }

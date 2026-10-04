@@ -1,6 +1,6 @@
 import { appendFile, mkdir, readFile } from "node:fs/promises";
 import path from "node:path";
-import type { DecisionType, ReviewErrorCode, ReviewMode, RiskLevel, Usage, Verdict } from "../schemas/review.js";
+import type { AnyMode, DecisionType, ReviewErrorCode, RiskLevel, Usage, Verdict } from "../schemas/review.js";
 
 /**
  * Opt-in local JSONL telemetry. Metadata only: no objective, context, proposal,
@@ -9,7 +9,7 @@ import type { DecisionType, ReviewErrorCode, ReviewMode, RiskLevel, Usage, Verdi
  */
 export interface ReviewRecordInput {
   id: string;
-  review_mode: ReviewMode;
+  review_mode: AnyMode;
   decision_type: DecisionType;
   risk_level: RiskLevel;
   reviewer_model: string;
@@ -69,16 +69,25 @@ export class Telemetry {
     return this.append(record);
   }
 
+  /** Reads all records; unreadable file -> []; malformed lines are skipped. */
   async readAll(): Promise<Record<string, unknown>[]> {
+    let text: string;
     try {
-      const text = await readFile(this.filePath, "utf8");
-      return text
-        .split(/\r?\n/)
-        .filter((l) => l.trim())
-        .map((l) => JSON.parse(l) as Record<string, unknown>);
+      text = await readFile(this.filePath, "utf8");
     } catch {
       return [];
     }
+    const out: Record<string, unknown>[] = [];
+    for (const line of text.split(/\r?\n/)) {
+      if (!line.trim()) continue;
+      try {
+        const v: unknown = JSON.parse(line);
+        if (v && typeof v === "object" && !Array.isArray(v)) out.push(v as Record<string, unknown>);
+      } catch {
+        // skip corrupt line (e.g. partial write)
+      }
+    }
+    return out;
   }
 
   /** Never throws: telemetry must not break a review. Returns whether the record was written. */

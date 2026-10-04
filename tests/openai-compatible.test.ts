@@ -96,10 +96,26 @@ describe("OpenAICompatibleProvider", () => {
     expect(calls[2]!.body).not.toHaveProperty("response_format");
   });
 
+  it("sends temperature when configured and drops it if rejected", async () => {
+    const { impl, calls } = mockFetch((_c, i) =>
+      i === 0 ? new Response("Unsupported value: 'temperature' does not support 0.2 with this model", { status: 400 }) : ok({}),
+    );
+    await provider(impl, { temperature: 0.2 }).complete(req());
+    expect(calls[0]!.body.temperature).toBe(0.2);
+    expect(calls[1]!.body).not.toHaveProperty("temperature");
+  });
+
+  it("reports finish_reason", async () => {
+    const { impl } = mockFetch(
+      () => new Response(JSON.stringify({ choices: [{ message: { content: "{" }, finish_reason: "length" }] }), { status: 200 }),
+    );
+    expect((await provider(impl).complete(req())).finishReason).toBe("length");
+  });
+
   it("does not loop forever on persistent 400s", async () => {
     const { impl, calls } = mockFetch(() => new Response("bad request: reasoning max_completion_tokens response_format", { status: 400 }));
     expect(await codeOf(provider(impl, { reasoningEffort: "high" }).complete(req()))).toBe("PROVIDER_HTTP_ERROR");
-    expect(calls.length).toBeLessThanOrEqual(4);
+    expect(calls.length).toBeLessThanOrEqual(5);
   });
 
   it.each([401, 404, 429, 500, 503])("maps HTTP %i to PROVIDER_HTTP_ERROR with status", async (status) => {

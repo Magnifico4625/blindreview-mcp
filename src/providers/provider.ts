@@ -30,6 +30,8 @@ export interface CompletionResponse {
   toolCallCount: number;
   /** Model id reported by the API (falls back to the configured one). */
   model: string;
+  /** e.g. "stop" or "length" (output cut by max_tokens). */
+  finishReason?: string | undefined;
 }
 
 export interface ReviewerProvider {
@@ -38,9 +40,19 @@ export interface ReviewerProvider {
   complete(request: CompletionRequest): Promise<CompletionResponse>;
 }
 
-/** Rough token estimate (~4 chars/token) used only for budget pre-checks and missing usage. */
+/**
+ * Conservative token estimate used for budget pre-checks and when a provider omits usage.
+ * ASCII ~3 chars/token (real tokenizers average ~4 for English, so this over-estimates);
+ * every non-ASCII code point counts as one token (Cyrillic/CJK tokenize much worse than English).
+ */
 export function estimateTokens(text: string): number {
-  return Math.ceil(text.length / 4);
+  let ascii = 0;
+  let other = 0;
+  for (const ch of text) {
+    if (ch.charCodeAt(0) < 128) ascii++;
+    else other++;
+  }
+  return Math.ceil(ascii / 3) + other;
 }
 
 export function estimateMessagesTokens(messages: readonly ChatMessage[]): number {
