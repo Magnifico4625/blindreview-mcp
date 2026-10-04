@@ -1,19 +1,17 @@
 {
   "id": "billing-big-bang-refactor",
-  "title": "Rewriting the billing module across five services in one PR",
+  "title": "Rewriting billing logic across five services in one cut-over",
   "has_hidden_flaw": true,
-  "hidden_flaw": "Big-bang replacement without seams: no way to ship incrementally, compare old vs new outputs, or roll back one part; a months-long branch diverges from main; proration and tax edge cases have no characterisation tests. Should introduce a seam (interface/anti-corruption layer), add characterisation/golden tests on current behaviour, then strangle module by module with shadow mode / parallel run comparing invoices.",
-  "hidden_flaw_keywords": ["incremental|strangler|step|phase", "seam|interface|adapter|anti.corruption", "characteri[sz]ation|golden|snapshot|parallel run|shadow", "rollback|feature flag|toggle"],
-  "notes": "Fundamental flaw: big-bang multi-module rewrite without seams or behavioural safety net.",
+  "expected_verdict": "REPLACE",
+  "acceptable_verdicts": ["MODIFY", "REPLACE"],
+  "hidden_flaw": "Big-bang replacement without seams: a 3-month branch diverging from active main, no characterisation tests of current (quirky) behaviour, no way to compare old vs new invoices or roll back part of it. Should add characterisation/golden tests, introduce a seam, and migrate incrementally with a parallel run (shadow invoices) behind a flag.",
+  "hidden_flaw_keywords": ["incremental|strangler|step by step|phased", "characteri[sz]ation|golden|parallel run|shadow"],
+  "notes": "Flaw: big-bang multi-module rewrite without seams or behavioural safety net.",
   "input": {
-    "objective": "Replace the legacy billing calculation code (invoices, proration, tax) with a clean domain model so new pricing plans can be added in days instead of weeks.",
-    "constraints": [
-      "Billing errors directly cost money and trust; finance reconciles invoices monthly.",
-      "Team of 3 engineers; other feature work continues on main in parallel.",
-      "Must support existing plans exactly (including grandfathered ones)."
-    ],
-    "context": "Billing logic is spread across 5 services (subscriptions, invoicing, tax, payments, notifications) in a TypeScript monorepo, ~14k LOC, with shared mutable 'BillingContext' objects passed around. Test coverage of billing code is ~22%, mostly happy paths. There are 37 pricing plans, 11 grandfathered. Proration rules have known undocumented quirks that customers rely on.",
-    "proposed_solution": "Create a long-lived branch `billing-v2` and rewrite all billing logic in a new `packages/billing-core` package with a clean domain model (Plan, Subscription, Invoice, ProrationPolicy). Update all 5 services to call billing-core, delete the old code, and merge everything in one PR when finished (~3 months). Write unit tests for the new domain model as we go. A single cut-over avoids maintaining two implementations at once.",
+    "objective": "Make it possible to add new pricing plans in days instead of weeks.",
+    "constraints": ["Team of 3 engineers for this work.", "All 37 existing pricing plans, including 11 grandfathered ones, must keep producing the same invoices."],
+    "context": "Billing logic is spread across 5 services (subscriptions, invoicing, tax, payments, notifications) in a TypeScript monorepo, ~14k LOC, sharing a mutable `BillingContext` object. Billing test coverage is ~22%, mostly happy paths. Proration rules evolved over 6 years. Other teams merge ~40 PRs/week into main, some touching these services.",
+    "proposed_solution": "Create a `billing-v2` branch and build a new `packages/billing-core` package with a clean domain model (Plan, Subscription, Invoice, ProrationPolicy, TaxRule) and thorough unit tests for it. Port all 37 plans into the new model, switch the 5 services to billing-core, delete the old code and merge in one PR at the end (~3 months). A single cut-over means we never maintain two billing implementations or reconcile between them, and the team can design the model without legacy constraints.",
     "decision_type": "refactor",
     "risk_level": "high"
   }

@@ -1,0 +1,19 @@
+{
+  "id": "api-additive-field-sound",
+  "title": "Adding a string id alongside the numeric one (sound control)",
+  "has_hidden_flaw": false,
+  "expected_verdict": "KEEP",
+  "acceptable_verdicts": ["KEEP", "MODIFY"],
+  "hidden_flaw": "None intended. Additive, backward-compatible change with a deprecation path. KEEP expected; MODIFY with minor notes acceptable; REPLACE = false alarm.",
+  "hidden_flaw_keywords": [],
+  "notes": "Sound control (same problem as api-id-type-change, good proposal).",
+  "input": {
+    "objective": "Stop order IDs from being corrupted in JavaScript clients now that IDs are 64-bit Snowflake integers above 2^53.",
+    "constraints": ["Fix must be live within two weeks.", "No change to how IDs are generated."],
+    "context": "GET /v1/orders/{id} and list endpoints return `\"id\": 1234567890123456789` as a JSON number. The web frontend already displays wrong IDs for new orders. Consumers: the web app (deployed with the API), iOS app (Swift Codable `let id: Int64`), Android app (Kotlin + Moshi `val id: Long`), ~40 partner integrations using SDKs generated from our OpenAPI spec (`type: integer, format: int64`). Path parameters are parsed server-side as strings.",
+    "proposed_solution": "Keep `id` exactly as it is and add a new field `id_str` (string) to every object that carries an order ID, including nested references (`order_id` gets `order_id_str`). Update the OpenAPI spec additively and regenerate SDKs; switch the web app to `id_str` in the same release. Accept both numeric and string forms in path and query parameters. Announce `id` as deprecated for JavaScript consumers in the changelog and docs, measure `id_str` adoption from partner SDK user agents, and only consider removing the numeric field in a future v2.",
+    "decision_type": "api",
+    "risk_level": "high",
+    "environment": "Mobile apps are released weekly via the stores; users update at their own pace."
+  }
+}

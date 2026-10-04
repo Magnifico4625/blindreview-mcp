@@ -1,39 +1,70 @@
-import { mkdir, writeFile } from "node:fs/promises";
-import path from "node:path";
-import { parseArgs } from "node:util";
-import { pathToFileURL } from "node:url";
-import { loadConfig, loadDotEnv, type Config } from "../src/config.js";
-import { buildProvider } from "../src/create-server.js";
+import type { Config } from "../src/config.js";
 import type { ReviewerProvider } from "../src/providers/provider.js";
 import { Reviewer } from "../src/reviewer/reviewer.js";
-import { REVIEW_MODES, ReviewError, type ReviewMode } from "../src/schemas/review.js";
-import { loadCases, toReviewInput, type BenchmarkCase } from "./cases.js";
+import { ReviewError, type AnyMode, type ReviewResult, type Verdict } from "../src/schemas/review.js";
+import { toReviewInput, type BenchmarkCase } from "./cases.js";
 import { evaluateRun, summarize, type ModeSummary, type RunEvaluation, type RunOutcome } from "./evaluator.js";
+import { fmtRate, fmtSpread, rng, shuffle } from "./stats.js";
+
+export const DEFAULT_MODES: readonly AnyMode[] = ["proposal_first", "proposal_first_2pass", "blind_first"];
+
+export interface BenchmarkOptions {
+  modes?: readonly AnyMode[];
+  runs?: number;
+  seed?: number;
+  /** Number of (case, run) units executed in parallel. Modes inside a unit run sequentially. */
+  concurrency?: number;
+  log?: (msg: string) => void;
+}
+
+export interface CaseRun {
+  run: number;
+  mode_order: AnyMode[];
+  results: Partial<Record<AnyMode, { outcome: RunOutcome; evaluation: RunEvaluation }>>;
+}
 
 export interface BenchmarkReport {
   created_at: string;
   model: string;
   base_url_host: string;
-  budget: { max_tokens_per_call: number; max_review_tokens: number; timeout_ms: number; reasoning_effort: string | null };
-  modes: ReviewMode[];
+  budget: {
+    max_tokens_per_call: number;
+    max_review_tokens: number;
+    timeout_ms: number;
+    reasoning_effort: string | null;
+    temperature: number | null;
+  };
+  modes: AnyMode[];
+  runs: number;
+  seed: number;
   cases: Array<{
     id: string;
     title: string;
     has_hidden_flaw: boolean;
-    hidden_flaw_keywords: string[];
-    runs: Partial<Record<ReviewMode, { outcome: RunOutcome; evaluation: RunEvaluation }>>;
+    expected_verdict: Verdict;
+    acceptable_verdicts: Verdict[];
+    runs: CaseRun[];
   }>;
   summary: ModeSummary[];
 }
 
-/** Same model, same budget for every mode: each run gets a fresh Reviewer built from one config. */
+/**
+ * Same model, same budget, same config for every mode; each review gets a fresh Reviewer.
+ * Mode order is shuffled per (case, run) with a seeded PRNG so order effects average out
+ * and runs are reproducible.
+ */
 export async function runBenchmark(
   cases: BenchmarkCase[],
   config: Config,
   provider: ReviewerProvider,
-  modes: readonly ReviewMode[] = ["proposal_first", "blind_first"],
-  log: (msg: string) => void = () => {},
+  options: BenchmarkOptions = {},
 ): Promise<BenchmarkReport> {
+  const modes = [...(options.modes ?? DEFAULT_MODES)];
+  const runs = Math.max(1, options.runs ?? 3);
+  const seed = options.seed ?? 42;
+  const log = options.log ?? (() => {});
+  const random = rng(seed);
+
   const report: BenchmarkReport = {
     created_at: new Date().toISOString(),
     model: provider.model,
@@ -43,86 +74,127 @@ export async function runBenchmark(
       max_review_tokens: config.maxReviewTokens,
       timeout_ms: config.timeoutMs,
       reasoning_effort: config.reasoningEffort ?? null,
+      temperature: config.temperature ?? null,
     },
-    modes: [...modes],
-    cases: [],
-    summary: [],
-  };
-  for (const c of cases) {
-    const entry: BenchmarkReport["cases"][number] = {
+    modes,
+    runs,
+    seed,
+    cases: cases.map((c) => ({
       id: c.id,
       title: c.title,
       has_hidden_flaw: c.has_hidden_flaw,
-      hidden_flaw_keywords: c.hidden_flaw_keywords,
-      runs: {},
-    };
-    for (const mode of modes) {
-      const reviewer = new Reviewer({
-        provider,
-        maxTokensPerCall: config.maxTokensPerCall,
-        maxReviewTokens: config.maxReviewTokens,
-        maxToolCalls: config.maxToolCalls,
-        timeoutMs: config.timeoutMs,
-      });
-      const started = performance.now();
-      let outcome: RunOutcome;
-      try {
-        outcome = { ok: true, result: await reviewer.review(toReviewInput(c, mode)) };
-      } catch (err) {
-        const code = err instanceof ReviewError ? err.code : "INTERNAL_ERROR";
-        const message = err instanceof Error ? err.message : String(err);
-        outcome = { ok: false, error: { code, message }, latency_ms: Math.round(performance.now() - started) };
-      }
-      const evaluation = evaluateRun(c, outcome);
-      entry.runs[mode] = { outcome, evaluation };
-      log(
-        `${c.id} [${mode}] ${evaluation.ok ? `${evaluation.verdict} conf=${evaluation.confidence} tokens=${evaluation.total_tokens} ${evaluation.latency_ms}ms kw=${evaluation.keyword_groups_hit.length}/${c.hidden_flaw_keywords.length}` : `ERROR ${evaluation.error_code}`}`,
-      );
-    }
-    report.cases.push(entry);
+      expected_verdict: c.expected_verdict,
+      acceptable_verdicts: c.acceptable_verdicts,
+      runs: [],
+    })),
+    summary: [],
+  };
+
+  // Build all units up front (deterministic order + shuffles), then execute with a small pool.
+  const units: Array<{ ci: number; run: number; order: AnyMode[] }> = [];
+  for (let run = 1; run <= runs; run++) {
+    for (let ci = 0; ci < cases.length; ci++) units.push({ ci, run, order: shuffle(modes, random) });
   }
+
+  const reviewOne = async (c: BenchmarkCase, mode: AnyMode): Promise<RunOutcome> => {
+    const reviewer = new Reviewer({
+      provider,
+      maxTokensPerCall: config.maxTokensPerCall,
+      maxReviewTokens: config.maxReviewTokens,
+      timeoutMs: config.timeoutMs,
+      blindnessLeakThreshold: config.blindnessLeakThreshold,
+      blindnessWarnThreshold: config.blindnessWarnThreshold,
+    });
+    const started = performance.now();
+    try {
+      const opts = mode === "proposal_first_2pass" ? { benchmarkMode: mode } : {};
+      return { ok: true, result: await reviewer.review(toReviewInput(c, mode), opts) };
+    } catch (err) {
+      const code = err instanceof ReviewError ? err.code : "INTERNAL_ERROR";
+      const message = err instanceof Error ? err.message : String(err);
+      return { ok: false, error: { code, message }, latency_ms: Math.round(performance.now() - started) };
+    }
+  };
+
+  let next = 0;
+  const worker = async () => {
+    while (next < units.length) {
+      const unit = units[next++] as (typeof units)[number];
+      const c = cases[unit.ci] as BenchmarkCase;
+      const caseRun: CaseRun = { run: unit.run, mode_order: unit.order, results: {} };
+      for (const mode of unit.order) {
+        const outcome = await reviewOne(c, mode);
+        const evaluation = evaluateRun(c, outcome);
+        caseRun.results[mode] = { outcome, evaluation };
+        log(
+          `${c.id} run${unit.run} [${mode}] ${
+            evaluation.ok
+              ? `${evaluation.verdict} (expected ${c.expected_verdict}) conf=${evaluation.confidence} tokens=${evaluation.total_tokens} ${evaluation.latency_ms}ms`
+              : `ERROR ${evaluation.error_code}`
+          }`,
+        );
+      }
+      (report.cases[unit.ci] as BenchmarkReport["cases"][number]).runs.push(caseRun);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.max(1, options.concurrency ?? 1) }, worker));
+  for (const entry of report.cases) entry.runs.sort((a, b) => a.run - b.run);
+
   report.summary = modes.map((mode) =>
     summarize(
       mode,
-      report.cases.map((entry) => {
-        const c = cases.find((x) => x.id === entry.id) as BenchmarkCase;
-        return { c, e: (entry.runs[mode] as { evaluation: RunEvaluation }).evaluation };
-      }),
+      report.cases.flatMap((entry, ci) =>
+        entry.runs.map((r) => {
+          const res = r.results[mode] as { outcome: RunOutcome; evaluation: RunEvaluation };
+          const result: ReviewResult | undefined = res.outcome.ok ? res.outcome.result : undefined;
+          return { c: cases[ci] as BenchmarkCase, e: res.evaluation, ...(result ? { result } : {}) };
+        }),
+      ),
     ),
   );
   return report;
 }
 
-export function toMarkdown(report: BenchmarkReport): string {
+export function toMarkdown(report: BenchmarkReport, cost?: { usd: number; note: string }): string {
+  const b = report.budget;
   const lines: string[] = [
     `# BlindReview benchmark ${report.created_at}`,
     "",
-    `Model: \`${report.model}\` via ${report.base_url_host}. Budget: ${report.budget.max_review_tokens} tokens/review, ${report.budget.max_tokens_per_call} per call, reasoning_effort=${report.budget.reasoning_effort ?? "unset"}.`,
+    `Model \`${report.model}\` via ${report.base_url_host}; ${report.runs} run(s) per case and mode, seed ${report.seed}, mode order shuffled per case/run.`,
+    `Budget per review: ${b.max_review_tokens} tokens (${b.max_tokens_per_call} per call), timeout ${b.timeout_ms} ms, reasoning_effort=${b.reasoning_effort ?? "unset"}, temperature=${b.temperature ?? "provider default"}.`,
+    ...(cost ? [`Estimated cost: $${cost.usd.toFixed(4)} (${cost.note}).`] : []),
     "",
-    "Mechanical stats only (no LLM judge). `kw` = hidden-flaw keyword groups found in the returned review (heuristic).",
+    "Mechanical stats only, no LLM judge. Rates show k/n, % and 95% Wilson CI. Definitions: see benchmark/evaluator.ts.",
     "",
-    `| case | flaw? | ${report.modes.map((m) => `${m} verdict | conf | tokens | ms | kw`).join(" | ")} |`,
-    `|---|---|${report.modes.map(() => "---|---|---|---|---").join("|")}|`,
+    "## Summary per mode",
+    "",
+    "| mode | errors | flawed: exact | flawed: acceptable | flawed: under / over / abstain | sound: exact KEEP | sound: acceptable | sound: false alarm (REPLACE) | tokens/review (mean ± sd) | latency ms (mean ± sd) | kw ratio (weak) |",
+    "|---|---|---|---|---|---|---|---|---|---|---|",
   ];
-  for (const c of report.cases) {
-    const cells = report.modes.map((m) => {
-      const e = c.runs[m]?.evaluation;
-      if (!e) return "- | - | - | - | -";
-      if (!e.ok) return `ERROR ${e.error_code} | - | - | ${e.latency_ms} | -`;
-      return `${e.verdict} | ${e.confidence} | ${e.total_tokens} | ${e.latency_ms} | ${e.keyword_groups_hit.length}/${c.hidden_flaw_keywords.length}`;
-    });
-    lines.push(`| ${c.id} | ${c.has_hidden_flaw ? "yes" : "no"} | ${cells.join(" | ")} |`);
-  }
-  lines.push("", "## Summary", "", "| mode | runs | errors | flawed flagged (MODIFY/REPLACE) | avg kw hit ratio (flawed) | sound kept | avg conf | avg tokens | total tokens | avg ms |", "|---|---|---|---|---|---|---|---|---|---|");
   for (const s of report.summary) {
     lines.push(
-      `| ${s.mode} | ${s.runs} | ${s.errors} | ${s.flawed_flagged}/${s.flawed_cases} | ${s.avg_keyword_hit_ratio_flawed ?? "-"} | ${s.sound_kept}/${s.sound_cases} | ${s.avg_confidence ?? "-"} | ${s.avg_total_tokens ?? "-"} | ${s.total_tokens} | ${s.avg_latency_ms ?? "-"} |`,
+      `| ${s.mode} | ${s.errors}/${s.runs} | ${fmtRate(s.flawed.exact)} | ${fmtRate(s.flawed.acceptable)} | ${s.flawed.under} / ${s.flawed.over} / ${s.flawed.abstain} | ${fmtRate(s.sound.exact_keep)} | ${fmtRate(s.sound.acceptable)} | ${fmtRate(s.sound.false_alarm)} | ${fmtSpread(s.total_tokens)} | ${fmtSpread(s.latency_ms)} | ${s.flawed.kw_ratio_weak.mean ?? "-"} |`,
     );
+  }
+  lines.push("", "## Verdicts per case (all runs)", "", `| case | flaw? | expected (acceptable) | ${report.modes.join(" | ")} |`, `|---|---|---|${report.modes.map(() => "---").join("|")}|`);
+  for (const c of report.cases) {
+    const cells = report.modes.map((m) => {
+      const tally: Record<string, number> = {};
+      for (const r of c.runs) {
+        const e = r.results[m]?.evaluation;
+        const key = !e ? "-" : e.ok ? (e.verdict as string) : `ERR:${e.error_code}`;
+        tally[key] = (tally[key] ?? 0) + 1;
+      }
+      return Object.entries(tally)
+        .map(([k, n]) => `${k}×${n}`)
+        .join(" ");
+    });
+    lines.push(`| ${c.id} | ${c.has_hidden_flaw ? "yes" : "no"} | ${c.expected_verdict} (${c.acceptable_verdicts.join("/")}) | ${cells.join(" | ")} |`);
   }
   return `${lines.join("\n")}\n`;
 }
 
-function safeHost(url: string): string {
+export function safeHost(url: string): string {
   try {
     return new URL(url).host;
   } catch {
@@ -133,45 +205,4 @@ function safeHost(url: string): string {
 /** Windows-safe timestamp for file names (no ':' characters). */
 export function fileTimestamp(d: Date = new Date()): string {
   return d.toISOString().replace(/[:.]/g, "-");
-}
-
-async function main(): Promise<void> {
-  const { values, positionals } = parseArgs({
-    allowPositionals: true,
-    options: {
-      out: { type: "string", default: "benchmark-results" },
-      modes: { type: "string", default: "proposal_first,blind_first" },
-      only: { type: "string" },
-    },
-  });
-  const dir = path.resolve(positionals[0] ?? path.join("examples", "cases"));
-  const modes = values.modes.split(",").map((m) => m.trim()) as ReviewMode[];
-  for (const m of modes) if (!REVIEW_MODES.includes(m)) throw new Error(`Unknown mode ${m}`);
-
-  loadDotEnv();
-  const config = loadConfig();
-  let cases = await loadCases(dir);
-  if (values.only) {
-    const ids = new Set(values.only.split(","));
-    cases = cases.filter((c) => ids.has(c.id));
-  }
-  if (!cases.length) throw new Error(`No cases found in ${dir}`);
-  console.log(`Running ${cases.length} case(s) x ${modes.join(", ")} with ${config.model} @ ${safeHost(config.baseUrl)}`);
-
-  const report = await runBenchmark(cases, config, buildProvider(config), modes, (m) => console.log(m));
-  const outDir = path.resolve(values.out);
-  await mkdir(outDir, { recursive: true });
-  const base = path.join(outDir, fileTimestamp(new Date(report.created_at)));
-  await writeFile(`${base}.json`, `${JSON.stringify(report, null, 2)}\n`, "utf8");
-  await writeFile(`${base}.md`, toMarkdown(report), "utf8");
-  console.log(`\n${toMarkdown(report)}`);
-  console.log(`Saved ${base}.json and ${base}.md`);
-}
-
-const invokedDirectly = process.argv[1] !== undefined && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href;
-if (invokedDirectly) {
-  main().catch((err: unknown) => {
-    console.error(err instanceof Error ? err.message : String(err));
-    process.exit(1);
-  });
 }

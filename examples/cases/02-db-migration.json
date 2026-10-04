@@ -1,21 +1,19 @@
 {
   "id": "orders-column-migration",
-  "title": "Renaming/retyping a column on a 900M-row table during a rolling deploy",
+  "title": "Retyping and renaming a column on a 900M-row table",
   "has_hidden_flaw": true,
-  "hidden_flaw": "ALTER COLUMN TYPE rewrites the whole 900M-row table under an ACCESS EXCLUSIVE lock (hours of downtime), and dropping/renaming the old column in the same release breaks the old app version that is still serving traffic during the rolling deploy; the change is also non-reversible. Needs expand/contract: add new nullable column, dual-write, backfill in batches, switch reads, then drop in a later release.",
-  "hidden_flaw_keywords": ["lock|access exclusive", "rewrite|full table", "rolling|old version|backward", "expand|contract|dual.?write|backfill|batch"],
-  "notes": "Fundamental flaw: table rewrite under lock + destructive change while old code runs.",
+  "expected_verdict": "REPLACE",
+  "acceptable_verdicts": ["MODIFY", "REPLACE"],
+  "hidden_flaw": "ALTER COLUMN TYPE integer->numeric rewrites the 900M-row table under an ACCESS EXCLUSIVE lock (hours of blocked checkout), and renaming the column in the same release breaks the previous app version that keeps serving traffic during the rolling deploy; rollback is not possible. Needs expand/contract: new nullable column, dual-write, batched backfill, switch reads, drop later.",
+  "hidden_flaw_keywords": ["access exclusive|table rewrite|rewrites? the (whole|entire) table|lock", "expand|contract|dual.?write|backfill"],
+  "notes": "Flaw: blocking table rewrite + destructive rename while old code runs.",
   "input": {
-    "objective": "Change orders.amount from INTEGER (cents) to NUMERIC(19,4) and rename it to amount_minor to support currencies with 3-4 decimal minor units.",
-    "constraints": [
-      "Zero-downtime: checkout must stay available (SLO 99.95%).",
-      "Deploys are rolling over ~25 minutes; old and new app versions serve traffic simultaneously.",
-      "Rollback of the app must be possible within the release window."
-    ],
-    "context": "PostgreSQL 15 primary + 2 replicas. orders has ~900M rows (~410 GB with indexes), ~1,200 writes/s at peak. The app is a Django monolith; migrations run automatically as a pre-deploy job before pods are rolled. Three reporting jobs read orders.amount directly via SQL.",
-    "proposed_solution": "Write a single Django migration: `ALTER TABLE orders ALTER COLUMN amount TYPE NUMERIC(19,4); ALTER TABLE orders RENAME COLUMN amount TO amount_minor;` and update the model and the three reporting queries in the same PR. Run it in the pre-deploy job at night when traffic is lowest. Because it is one transaction, it either fully applies or rolls back, so it is safe.",
+    "objective": "Support currencies with three-decimal minor units (KWD, BHD, OMR) in order amounts.",
+    "constraints": ["Checkout SLO is 99.95% monthly.", "The change must ship in the release planned for next Tuesday."],
+    "context": "PostgreSQL 15 primary with 2 streaming replicas. `orders` has ~900M rows (~410 GB with indexes) and ~1,200 writes/s at peak, ~150/s at night. Amounts are stored in `orders.amount INTEGER` (cents). Django 4.2 monolith; three reporting jobs read `orders.amount` via raw SQL.",
+    "proposed_solution": "One Django migration: `ALTER TABLE orders ALTER COLUMN amount TYPE NUMERIC(19,4); ALTER TABLE orders RENAME COLUMN amount TO amount_minor;`. Update the model, the serializers and the three reporting queries in the same PR. Schedule the deploy at night when write traffic is lowest. PostgreSQL DDL is transactional, so the migration is atomic: it is either fully applied or rolled back, and NUMERIC(19,4) holds every existing integer value exactly.",
     "decision_type": "database",
     "risk_level": "critical",
-    "environment": "PostgreSQL 15, Django 4.2, Kubernetes rolling deploys, statement_timeout 30s for app role (not for migration role)."
+    "environment": "Kubernetes rolling deploys take ~25 minutes; migrations run in a pre-deploy job before pods are replaced. App role has statement_timeout=30s; the migration role has none."
   }
 }

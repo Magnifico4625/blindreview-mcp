@@ -1,0 +1,19 @@
+{
+  "id": "transactional-outbox-sound",
+  "title": "Transactional outbox for reliable event publishing (sound control)",
+  "has_hidden_flaw": false,
+  "expected_verdict": "KEEP",
+  "acceptable_verdicts": ["KEEP", "MODIFY"],
+  "hidden_flaw": "None intended. Standard outbox with SKIP LOCKED relay, at-least-once delivery and idempotent consumers. KEEP expected; MODIFY with minor notes acceptable; REPLACE = false alarm.",
+  "hidden_flaw_keywords": [],
+  "notes": "Sound control.",
+  "input": {
+    "objective": "Make sure an OrderPlaced event is published for every committed order and never for a rolled-back one.",
+    "constraints": ["No distributed transactions (no XA).", "Event delay up to a few seconds is acceptable."],
+    "context": "order-service (Java 21, Spring Boot, PostgreSQL 15) commits the order and then calls kafkaTemplate.send(\"orders\", event). About 0.05% of orders have no event (pod killed between commit and send, or broker timeouts), and a few events were sent for transactions that later rolled back because send() ran inside the transaction in one code path. Three downstream consumers (fulfilment, email, analytics) exist; each already stores processed event IDs.",
+    "proposed_solution": "Introduce a transactional outbox: in the same database transaction as the order insert, write a row to `outbox(id uuid, aggregate_id, type, payload jsonb, created_at, published_at null)`. A relay running in the order-service pods polls `SELECT ... FROM outbox WHERE published_at IS NULL ORDER BY created_at LIMIT 100 FOR UPDATE SKIP LOCKED`, publishes to Kafka with the outbox id as the event id and order id as the key (preserving per-order ordering), waits for broker acks, then sets published_at. Delivery is at-least-once; consumers deduplicate by event id, which they already store. Published rows are deleted after 7 days by a scheduled job. Add metrics for outbox lag and an alert when the oldest unpublished row is older than 1 minute.",
+    "decision_type": "architecture",
+    "risk_level": "high",
+    "environment": "Kubernetes, 6 order-service replicas, Kafka 3.6 with acks=all."
+  }
+}

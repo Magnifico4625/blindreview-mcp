@@ -1,22 +1,23 @@
 {
   "id": "authz-cache-ttl",
-  "title": "Caching per-user authorization decisions with TTL invalidation",
+  "title": "Caching per-user authorization decisions with TTL expiry",
   "has_hidden_flaw": true,
-  "hidden_flaw": "Permission revocations (role removal, employee offboarding, document unshare) stay effective for up to the TTL across every instance. For authz data, staleness is a security bug, not a performance trade-off; invalidation must be event-driven (versioned keys / pub-sub on permission change) or the cache must only hold positive grants with a very short TTL plus revocation checks.",
-  "hidden_flaw_keywords": ["revoc|revok", "stale|staleness", "invalidat", "offboard|remov|unshare|deprovision"],
-  "notes": "Fundamental flaw: TTL-based invalidation on authorization data.",
+  "expected_verdict": "MODIFY",
+  "acceptable_verdicts": ["MODIFY", "REPLACE"],
+  "hidden_flaw": "Revocations (unshare, role removal, offboarding) stay effective for up to 15 minutes on every pod, because entries only expire by TTL. For authorization data staleness is a security bug. Fix: event-driven invalidation from the existing permission events (or versioned keys) with TTL only as a backstop, and never cache in a way that can fail open.",
+  "hidden_flaw_keywords": ["revo[ck]", "invalidat"],
+  "notes": "Flaw: TTL-only invalidation on authz data. Direction (caching) is fine, so MODIFY is expected.",
   "input": {
-    "objective": "Cut p95 latency of the document API, which is dominated by authorization checks against the permissions service.",
+    "objective": "Cut p95 latency of GET /documents/:id, which is dominated by authorization checks against the permissions service.",
     "constraints": [
-      "Must not change the permissions service API (owned by another team).",
-      "p95 latency budget for GET /documents/:id is 120 ms; currently 340 ms.",
-      "Compliance (SOC 2) requires that access revocation takes effect promptly for terminated employees and unshared documents."
+      "The permissions service API is owned by another team and cannot change this quarter.",
+      "p95 budget for GET /documents/:id is 120 ms; currently 340 ms."
     ],
-    "context": "Document service (Node.js, 12 pods behind a load balancer) calls permissions-service.check(userId, docId, action) on every request (~180 ms p95, 2,500 rps peak). Permissions change via an admin UI and an HR offboarding integration; the permissions service emits a 'permission.changed' event on Kafka for every grant/revoke, which nobody consumes yet. Redis 7 cluster already exists for sessions. Roughly 85% of checks are repeat (userId, docId) pairs within 10 minutes.",
-    "proposed_solution": "Add a read-through cache in Redis keyed by `authz:{userId}:{docId}:{action}` storing the boolean decision with a 15-minute TTL. On a cache miss, call permissions-service and store the result. No explicit invalidation is needed because entries expire after 15 minutes, which keeps the implementation simple and avoids coupling to the permissions team. Expected hit rate 85%, p95 drops to ~40 ms.",
+    "context": "Document service (Node.js 20, 12 pods) calls permissions-service.check(userId, docId, action) on every request: ~180 ms p95, 2,500 rps peak. Users share and unshare documents in the web UI; an HR integration removes accounts and group memberships when people leave. The permissions service publishes a message to the Kafka topic `permission-events` on every write. A Redis 7 cluster is already used for sessions.",
+    "proposed_solution": "Add a read-through cache in the existing Redis cluster, keyed by `authz:{userId}:{docId}:{action}`, storing the boolean decision with a 15-minute TTL. On a miss we call permissions-service and store the result. Entries expire on their own, which keeps the document service decoupled from the permissions team's internals and avoids another consumer to operate. Replaying 24 h of access logs gives an 85% hit rate at 15 minutes (78% at 2 minutes), so p95 should drop to ~40 ms. Rollout behind a feature flag, starting with 10% of traffic, with hit-rate and latency dashboards.",
     "decision_type": "architecture",
     "risk_level": "high",
-    "environment": "Kubernetes, 12 replicas, Redis 7 cluster, Kafka available, Node.js 20.",
-    "evidence": ["APM: 71% of request time spent in permissions-service.check", "Cache hit simulation on 24h of logs: 85% at 15 min window, 78% at 2 min window"]
+    "environment": "Kubernetes, 12 replicas, Redis 7 cluster, Kafka 3.6, Node.js 20.",
+    "evidence": ["APM: 71% of request time is spent in permissions-service.check", "Log replay hit rate: 85% at 15 min window, 78% at 2 min window"]
   }
 }

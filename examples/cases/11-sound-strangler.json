@@ -1,0 +1,18 @@
+{
+  "id": "billing-strangler-sound",
+  "title": "Incremental billing refactor with characterisation tests and shadow run (sound control)",
+  "has_hidden_flaw": false,
+  "expected_verdict": "KEEP",
+  "acceptable_verdicts": ["KEEP", "MODIFY"],
+  "hidden_flaw": "None intended. Seam + golden tests + shadow comparison + per-plan cut-over with flag. KEEP expected; MODIFY with minor notes acceptable; REPLACE = false alarm.",
+  "hidden_flaw_keywords": [],
+  "notes": "Sound control (same problem as billing-big-bang-refactor, good proposal).",
+  "input": {
+    "objective": "Make it possible to add new pricing plans in days instead of weeks.",
+    "constraints": ["Team of 3 engineers for this work.", "All 37 existing pricing plans, including 11 grandfathered ones, must keep producing the same invoices."],
+    "context": "Billing logic is spread across 5 services (subscriptions, invoicing, tax, payments, notifications) in a TypeScript monorepo, ~14k LOC, sharing a mutable `BillingContext` object. Billing test coverage is ~22%, mostly happy paths. Proration rules evolved over 6 years. Other teams merge ~40 PRs/week into main, some touching these services. 18 months of issued invoices are stored with their inputs.",
+    "proposed_solution": "First, build characterisation (golden) tests: replay the stored 18 months of invoice inputs through today's code and snapshot the outputs. Then introduce a `BillingCalculator` interface at the single point where invoicing asks for line items, with the legacy code as the first implementation. Build the new domain model behind that interface on main, in small PRs. Run the new calculator in shadow mode in production, computing every invoice with both implementations and logging diffs without affecting customers. Move plans one by one behind a per-plan feature flag once their diff rate has been zero for two billing cycles; delete legacy paths per plan afterwards. Grandfathered plans move last.",
+    "decision_type": "refactor",
+    "risk_level": "high"
+  }
+}

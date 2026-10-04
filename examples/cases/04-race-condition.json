@@ -2,17 +2,18 @@
   "id": "coupon-double-redeem",
   "title": "Fixing double redemption of single-use coupons",
   "has_hidden_flaw": true,
-  "hidden_flaw": "An in-process mutex only serialises requests inside one Node.js process; the service runs 8 replicas (and each may run multiple workers), so the check-then-act race remains across instances. Needs an atomic DB-level operation (conditional UPDATE ... WHERE redeemed_at IS NULL RETURNING, unique constraint on redemptions, or SELECT ... FOR UPDATE).",
-  "hidden_flaw_keywords": ["instance|replica|pod|process|horizontal", "atomic|conditional update|compare.and.set|cas", "unique|constraint|for update|row lock|transaction", "distributed"],
-  "notes": "Fundamental flaw: process-local lock for a cross-instance race.",
+  "expected_verdict": "REPLACE",
+  "acceptable_verdicts": ["MODIFY", "REPLACE"],
+  "hidden_flaw": "An in-process mutex only serialises requests inside one Node.js process; the service runs several replicas behind a load balancer, so the check-then-act race remains across pods. Needs an atomic database operation: conditional UPDATE ... WHERE redeemed_at IS NULL RETURNING, a unique constraint on redemptions, or SELECT ... FOR UPDATE.",
+  "hidden_flaw_keywords": ["replica|pod|instance|multiple process", "atomic|conditional update|where redeemed_?at is null|unique|for update"],
+  "notes": "Flaw: process-local lock for a cross-instance race.",
   "input": {
-    "objective": "Stop single-use coupons from being redeemed twice when users double-click or retry checkout.",
-    "constraints": ["Must ship this week.", "Checkout p99 must stay under 800 ms.", "No new infrastructure components without platform-team approval."],
-    "context": "coupon-service (Node.js 20, Express, Postgres 14 via Prisma). Redeem flow: `const c = await prisma.coupon.findUnique({where:{code}}); if (c.redeemedAt) throw Used; await chargeOrder(); await prisma.coupon.update({where:{code}, data:{redeemedAt: new Date(), orderId}})`. Finance found 312 double redemptions last month, clustered within 300 ms of each other, often from the same user on mobile with flaky networks (client retries).",
-    "proposed_solution": "Wrap the redeem flow in an async mutex keyed by coupon code using the `async-mutex` package (a Map<code, Mutex>), so concurrent requests for the same code are serialised and the second one sees redeemedAt and fails. Add a unit test that fires two concurrent redeem calls and asserts only one succeeds. Low risk, ~30 lines, no schema change.",
+    "objective": "Stop single-use coupons from being redeemed twice.",
+    "constraints": ["Must ship this week.", "Checkout p99 must stay under 800 ms."],
+    "context": "coupon-service: Node.js 20, Express, Postgres 14 via Prisma. Redeem flow: `const c = await prisma.coupon.findUnique({ where: { code } }); if (c.redeemedAt) throw new AlreadyUsed(); await chargeOrder(order); await prisma.coupon.update({ where: { code }, data: { redeemedAt: new Date(), orderId: order.id } });`. Finance found 312 double redemptions last month; the two redemptions are usually 50-300 ms apart, often from mobile clients that retry after a 2 s timeout.",
+    "proposed_solution": "Serialise redemptions per coupon code with an async mutex (`async-mutex`, a Map<code, Mutex> with cleanup when the lock is released). The second concurrent request waits, then sees `redeemedAt` set and fails cleanly with AlreadyUsed. Add a test that fires two concurrent redeem calls for the same code and asserts exactly one succeeds; it fails on main and passes with the fix. About 30 lines, no schema change, no new infrastructure.",
     "decision_type": "debugging",
     "risk_level": "high",
-    "environment": "Kubernetes, coupon-service runs 8 replicas behind a round-robin load balancer; clients retry on timeout after 2 s.",
-    "evidence": ["Duplicate redemptions: 312 in September; 71% had requests landing on different pods (by pod label in logs)."]
+    "environment": "Kubernetes Deployment with HPA (min 4, max 12 replicas) behind a round-robin Service."
   }
 }

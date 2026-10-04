@@ -1,0 +1,18 @@
+{
+  "id": "graphql-dataloader-sound",
+  "title": "Per-request DataLoader to remove N+1 queries (sound control)",
+  "has_hidden_flaw": false,
+  "expected_verdict": "KEEP",
+  "acceptable_verdicts": ["KEEP", "MODIFY"],
+  "hidden_flaw": "None intended. Per-request batching loaders (no cross-request cache, so no cross-user leakage), keyed result ordering, query-count tests. KEEP expected; MODIFY with minor notes acceptable; REPLACE = false alarm.",
+  "hidden_flaw_keywords": [],
+  "notes": "Sound control.",
+  "input": {
+    "objective": "Bring p95 of the `projectDashboard` GraphQL query from 1.9 s down below 400 ms.",
+    "constraints": ["No schema changes visible to clients.", "Authorization rules must not change."],
+    "context": "Node.js 20, Apollo Server 4, PostgreSQL via Knex. `projectDashboard` returns ~50 tasks, each resolving `assignee`, `labels` and `lastComment` with one SQL query per task per field: ~150-200 queries per request (seen in query logs). Row-level authorization is applied inside the repository functions using the request's user from context.",
+    "proposed_solution": "Create DataLoader instances per request in the Apollo context factory (users by id, labels by task id, last comment by task id), so batching and memoisation are scoped to one request and one user and nothing is cached across requests. Each batch function issues one `WHERE ... IN (...)` query through the existing repository functions, so the same authorization filters apply, and returns results in the same order as the input keys (null for missing). Add a test that counts SQL queries for a 50-task dashboard and asserts it stays under 10, and compare p95 in staging with production-like data before rollout.",
+    "decision_type": "performance",
+    "risk_level": "medium"
+  }
+}
