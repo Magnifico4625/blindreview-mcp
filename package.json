@@ -1,0 +1,57 @@
+{
+  "name": "blindreview-mcp",
+  "version": "0.1.0",
+  "description": "BlindReview MCP: one independent, blind-first reviewer for expensive decisions of AI coding agents.",
+  "type": "module",
+  "license": "MIT",
+  "author": "Magnifico4625",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Magnifico4625/blindreview-mcp.git"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "code-review",
+    "ai-agents",
+    "anchoring",
+    "blind-review"
+  ],
+  "engines": {
+    "node": ">=20.12"
+  },
+  "bin": {
+    "blindreview-mcp": "dist/src/server.js"
+  },
+  "main": "dist/src/server.js",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    ".env.example"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint .",
+    "pretest": "npm run build",
+    "test": "vitest run",
+    "start": "node dist/src/server.js",
+    "prebenchmark": "npm run build",
+    "benchmark": "node dist/benchmark/runner.js",
+    "outcome": "node dist/src/cli/outcome.js",
+    "check": "npm run lint && npm run typecheck && npm test"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^20.19.43",
+    "eslint": "^10.12.0",
+    "typescript": "~6.0.3",
+    "typescript-eslint": "^8.71.0",
+    "vitest": "^4.1.11"
+  }
+}

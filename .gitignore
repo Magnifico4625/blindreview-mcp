@@ -1,0 +1,13 @@
+node_modules/
+dist/
+coverage/
+.env
+.env.*
+!.env.example
+data/
+benchmark-results/*
+!benchmark-results/sample/
+!benchmark-results/sample/**
+*.log
+.DS_Store
+Thumbs.db

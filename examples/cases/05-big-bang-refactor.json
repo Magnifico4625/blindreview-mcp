@@ -1,0 +1,20 @@
+{
+  "id": "billing-big-bang-refactor",
+  "title": "Rewriting the billing module across five services in one PR",
+  "has_hidden_flaw": true,
+  "hidden_flaw": "Big-bang replacement without seams: no way to ship incrementally, compare old vs new outputs, or roll back one part; a months-long branch diverges from main; proration and tax edge cases have no characterisation tests. Should introduce a seam (interface/anti-corruption layer), add characterisation/golden tests on current behaviour, then strangle module by module with shadow mode / parallel run comparing invoices.",
+  "hidden_flaw_keywords": ["incremental|strangler|step|phase", "seam|interface|adapter|anti.corruption", "characteri[sz]ation|golden|snapshot|parallel run|shadow", "rollback|feature flag|toggle"],
+  "notes": "Fundamental flaw: big-bang multi-module rewrite without seams or behavioural safety net.",
+  "input": {
+    "objective": "Replace the legacy billing calculation code (invoices, proration, tax) with a clean domain model so new pricing plans can be added in days instead of weeks.",
+    "constraints": [
+      "Billing errors directly cost money and trust; finance reconciles invoices monthly.",
+      "Team of 3 engineers; other feature work continues on main in parallel.",
+      "Must support existing plans exactly (including grandfathered ones)."
+    ],
+    "context": "Billing logic is spread across 5 services (subscriptions, invoicing, tax, payments, notifications) in a TypeScript monorepo, ~14k LOC, with shared mutable 'BillingContext' objects passed around. Test coverage of billing code is ~22%, mostly happy paths. There are 37 pricing plans, 11 grandfathered. Proration rules have known undocumented quirks that customers rely on.",
+    "proposed_solution": "Create a long-lived branch `billing-v2` and rewrite all billing logic in a new `packages/billing-core` package with a clean domain model (Plan, Subscription, Invoice, ProrationPolicy). Update all 5 services to call billing-core, delete the old code, and merge everything in one PR when finished (~3 months). Write unit tests for the new domain model as we go. A single cut-over avoids maintaining two implementations at once.",
+    "decision_type": "refactor",
+    "risk_level": "high"
+  }
+}

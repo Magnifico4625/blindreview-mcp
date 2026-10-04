@@ -1,0 +1,20 @@
+{
+  "id": "api-id-type-change",
+  "title": "Changing a public API field from number to string",
+  "has_hidden_flaw": true,
+  "hidden_flaw": "Changing `id` from number to string in v1 responses breaks existing typed clients (mobile apps with strict decoders, generated SDKs) that cannot be force-upgraded; old app versions stay in the wild for months. Requires additive change (new field `id_str` / new API version), deprecation window and telemetry on client versions.",
+  "hidden_flaw_keywords": ["break|breaking", "old client|existing client|older app|backward|compat", "version|v2|additive|new field|id_str", "decod|deserializ|parse"],
+  "notes": "Fundamental flaw: in-place type change of a field consumed by clients that cannot be upgraded in lockstep.",
+  "input": {
+    "objective": "Fix ID precision loss: order IDs are now Snowflake 64-bit integers and JavaScript clients corrupt them above 2^53.",
+    "constraints": [
+      "Public REST API v1 is used by our iOS/Android apps and ~40 partner integrations.",
+      "Mobile app versions older than 6 months are still ~18% of traffic; forced upgrade is not allowed by product.",
+      "Partners were promised 6 months notice for breaking changes."
+    ],
+    "context": "GET /v1/orders/{id} and list endpoints return `\"id\": 1234567890123456789` as a JSON number. The web frontend already shows wrong IDs for new orders. iOS uses Codable with `let id: Int64`; Android uses Moshi with `val id: Long`; partner SDKs are generated from our OpenAPI spec (type: integer, format: int64).",
+    "proposed_solution": "Change the `id` field in all v1 responses to a JSON string (e.g. \"1234567890123456789\") and update the OpenAPI spec to `type: string`. Strings are the industry standard for 64-bit IDs (Twitter did the same), and since the numeric value does not change, clients just need to read it as a string. Ship it in the next weekly release and post a changelog entry.",
+    "decision_type": "api",
+    "risk_level": "high"
+  }
+}

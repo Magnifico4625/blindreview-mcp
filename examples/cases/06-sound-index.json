@@ -1,0 +1,17 @@
+{
+  "id": "concurrent-index-sound",
+  "title": "Adding an index concurrently for a slow query (control: sound proposal)",
+  "has_hidden_flaw": false,
+  "hidden_flaw": "None intended. Control case: the proposal is reasonable (CREATE INDEX CONCURRENTLY outside a transaction, verify with EXPLAIN, check for invalid index on failure). A good reviewer should KEEP or suggest minor modifications.",
+  "hidden_flaw_keywords": [],
+  "notes": "Control case to measure false alarms. Expected verdict: KEEP (or MODIFY with minor notes).",
+  "input": {
+    "objective": "Fix a slow customer-facing query: listing a user's recent invoices takes 2.5 s p95.",
+    "constraints": ["No downtime.", "Writes to invoices must not be blocked for more than a few seconds."],
+    "context": "PostgreSQL 15. Query: `SELECT * FROM invoices WHERE account_id = $1 AND status <> 'void' ORDER BY created_at DESC LIMIT 20`. invoices has 60M rows, ~150 writes/s. Existing indexes: PK(id), (status). EXPLAIN ANALYZE shows a sequential scan filtered by account_id. Average 400 invoices per account, max 2M for a few enterprise accounts.",
+    "proposed_solution": "Create `CREATE INDEX CONCURRENTLY idx_invoices_account_created ON invoices (account_id, created_at DESC);` in a migration marked non-transactional (CONCURRENTLY cannot run inside a transaction). After it builds, verify with EXPLAIN ANALYZE that the planner uses an index scan with LIMIT and p95 drops; if the build fails, drop the INVALID index and retry. Leave the status filter as a post-filter since 'void' invoices are <1% of rows.",
+    "decision_type": "performance",
+    "risk_level": "medium",
+    "environment": "PostgreSQL 15 on RDS, 16 vCPU, migrations via a tool that supports per-migration disable_ddl_transaction."
+  }
+}

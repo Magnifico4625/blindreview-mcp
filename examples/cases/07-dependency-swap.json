@@ -1,0 +1,16 @@
+{
+  "id": "queue-swap-redis-streams",
+  "title": "Replacing RabbitMQ with Redis Pub/Sub for job dispatch",
+  "has_hidden_flaw": true,
+  "hidden_flaw": "Redis Pub/Sub is fire-and-forget: messages published while a consumer is disconnected/restarting are lost, there are no acks, retries or dead-lettering, so at-least-once delivery for payment webhooks is silently broken during every deploy. Redis Streams with consumer groups (XREADGROUP/XACK/XAUTOCLAIM) or keeping RabbitMQ would preserve delivery guarantees.",
+  "hidden_flaw_keywords": ["lost|loss|drop", "ack|acknowledg", "durab|persist|at.least.once|delivery guarantee", "stream|consumer group|xreadgroup"],
+  "notes": "Fundamental flaw: replacing a durable broker with a non-durable pub/sub for jobs requiring at-least-once.",
+  "input": {
+    "objective": "Reduce operational burden by removing RabbitMQ; the team already runs Redis and nobody wants to own RabbitMQ upgrades.",
+    "constraints": ["Payment webhook jobs must be processed at least once (losing one means a customer is charged but the order is not fulfilled).", "Workers are redeployed several times per day.", "Throughput ~300 jobs/s peak."],
+    "context": "Python services publish jobs to RabbitMQ (durable queues, manual acks, DLQ after 5 retries). Workers (Celery-like custom code) consume ~20 job types, including payment webhooks, emails, and thumbnail generation. Redis 7 (with AOF persistence) is used for caching and rate limiting.",
+    "proposed_solution": "Replace RabbitMQ with Redis Pub/Sub: publishers call PUBLISH jobs:<type> <payload>, workers SUBSCRIBE to their channels and process messages as they arrive. Redis is already deployed with AOF persistence, so messages are durable, and Pub/Sub is extremely fast. Remove the RabbitMQ cluster after a one-week migration.",
+    "decision_type": "dependency",
+    "risk_level": "high"
+  }
+}
