@@ -286,3 +286,22 @@ describe("runner, budget and metrics", () => {
     expect(projectVerdict(["archive", "archive"])).toBe("archive");
   });
 });
+
+describe("pilot fixes", () => {
+  it("normalizes a flattened claim (claim as string + top-level fields)", async () => {
+    const { normalizeGateAnswer, GateAnswerSchema } = await import("../src/evidence/gate.js");
+    const flat = { decision: "CLAIM", summary: "s", claim: "loop off by one", severity: "High", evidence_needed: "e", verification: "v", evidence_refs: "T1", result: "Confirmed", verdict: "modify" };
+    const r = GateAnswerSchema.safeParse(normalizeGateAnswer(flat));
+    expect(r.success).toBe(true);
+    expect(r.success && r.data.claim).toMatchObject({ claim: "loop off by one", severity: "high", evidence_refs: ["T1"], result: "confirmed", verdict: "MODIFY" });
+  });
+
+  it("CostMeter.wrap meters usage and the provider can still read the body", async () => {
+    const meter = new CostMeter();
+    const inner = (async () => new Response(JSON.stringify({ choices: [{ message: { content: "x" } }], usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15, cost: 0.001 } }), { status: 200 })) as unknown as typeof fetch;
+    const res = await meter.wrap(inner)("http://x", {});
+    expect(((await res.json()) as { choices: unknown[] }).choices).toHaveLength(1);
+    expect(meter.reported).toBeCloseTo(0.001);
+    expect(meter.callsWithoutCost).toBe(0);
+  });
+});

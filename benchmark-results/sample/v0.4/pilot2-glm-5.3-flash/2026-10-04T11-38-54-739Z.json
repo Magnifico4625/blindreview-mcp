@@ -1,0 +1,421 @@
+{
+  "schema": "blindreview-repo-benchmark/v1",
+  "label": "pilot2-glm-5.3-flash",
+  "created_at": "2026-10-04T11:38:54.739Z",
+  "git": {
+    "sha": "a77933d2514a074927f518e78d1629699e563f0c",
+    "dirty": true
+  },
+  "model": "z-ai/glm-5.3-flash",
+  "base_url_host": "openrouter.ai",
+  "config": {
+    "evidence_limits": {
+      "maxToolCalls": 8,
+      "maxReviewTokens": 80000,
+      "maxTokensPerCall": 8000,
+      "timeoutMs": 300000
+    },
+    "text_max_review_tokens": 24000,
+    "text_max_tokens_per_call": 6000,
+    "reasoning_effort": null,
+    "temperature": null,
+    "retries": 2,
+    "concurrency": 4
+  },
+  "pricing": {
+    "prompt": 1.5e-7,
+    "completion": 5e-7
+  },
+  "case_set_hash": "2239b07cb5552217-subset2",
+  "case_count": 2,
+  "prompt_hashes": {
+    "proposal_first": "86399d1d74424d49",
+    "proposal_first_2pass": "babc3ad0bb43463c",
+    "blind_first": "d62bdbaf1e4a7d18",
+    "repair": "1cd5c9f17886635b",
+    "independent_only": "16d4fca86343b220",
+    "decision_judge": "60b581a50444a02e",
+    "evidence_gate": "27b99c0914be4874"
+  },
+  "modes": [
+    "evidence_gate",
+    "decision_judge"
+  ],
+  "runs": 1,
+  "seed": 42,
+  "records": [
+    {
+      "case_id": "remove-xml-exporter",
+      "run": 1,
+      "mode": "decision_judge",
+      "model": "z-ai/glm-5.3-flash",
+      "attempts": 1,
+      "retries": [],
+      "ok": true,
+      "usage_all_attempts": {
+        "prompt_tokens": 1097,
+        "completion_tokens": 3163,
+        "total_tokens": 4260
+      },
+      "cost_usd_all_attempts": 0.00166925,
+      "cost_source": "reported",
+      "latency_ms": 108489,
+      "verdict": "INSUFFICIENT_EVIDENCE",
+      "review": {
+        "verdict": "INSUFFICIENT_EVIDENCE",
+        "recommendation": "The patch itself is clean and internally consistent (registry entry, module, and test all removed together), so no code change is needed. However, the 'no users' claim was substantiated only for code references to toXml and the web UI, while the hard constraint protects config-driven scheduled reports — and the contents of config/report-schedules.json, which is in the snapshot, are unverified. Before keeping, confirm no schedule entry has format 'xml' (grep the config and src/scheduler.js); if any does, migrate that schedule to csv/json first, then re-apply the deletion. If the config is clean, ship as is.",
+        "critical_assumptions": [
+          "No entry in config/report-schedules.json selects format 'xml' — the proposal's evidence (UI offerings, code references to toXml) does not cover string-based config lookups",
+          "No on-demand path outside the visible web UI (e.g., an API or job runner not in the snapshot) accepts or emits format 'xml'",
+          "The EXPORTERS registry is the only dispatch mechanism — no dynamic import or path-built require of './xml.js' elsewhere",
+          "No external consumer or contract requires XML delivery of generated reports going forward"
+        ],
+        "material_risks": [
+          "If any scheduled report uses 'xml', getExporter('xml') will throw 'unknown format' on every run after deployment, directly violating the do-not-break constraint; depending on scheduler error handling this may fail silently or repeatedly",
+          "If an external client requests xml on demand via a format parameter, that integration breaks at runtime with no compile-time or test signal, since the 'unknown format throws' test only exercises 'pdf'"
+        ],
+        "falsification_probe": {
+          "description": "Run: grep -Rin '\"xml\"' config/report-schedules.json src/ test/ package.json && grep -n 'format' config/report-schedules.json — i.e., inspect every format value in the schedule config and search the repo for any other string-based 'xml' lookup.",
+          "expected_signal": "Any schedule entry with \"format\": \"xml\" (or any non-registry 'xml' lookup) falsifies the no-users claim and requires migrating that schedule to csv/json before the deletion is safe; zero matches confirms the proposal and it can be kept as is."
+        },
+        "confidence": 0.68,
+        "meta": {
+          "review_id": "20eafd4b-ea37-4bca-97ef-face32af9275",
+          "review_mode": "decision_judge",
+          "model": "z-ai/glm-5.3-flash",
+          "phases": 1,
+          "usage": {
+            "prompt_tokens": 1097,
+            "completion_tokens": 3163,
+            "total_tokens": 4260
+          },
+          "latency_ms": 108489
+        }
+      }
+    },
+    {
+      "case_id": "remove-xml-exporter",
+      "run": 1,
+      "mode": "evidence_gate",
+      "model": "z-ai/glm-5.3-flash",
+      "attempts": 1,
+      "retries": [],
+      "ok": true,
+      "usage_all_attempts": {
+        "prompt_tokens": 6972,
+        "completion_tokens": 1422,
+        "total_tokens": 8394
+      },
+      "cost_usd_all_attempts": 0.001154656,
+      "cost_source": "reported",
+      "latency_ms": 12987,
+      "verdict": "MODIFY",
+      "model_verdict": "MODIFY",
+      "evidence": {
+        "verdict": "MODIFY",
+        "answer": {
+          "decision": "CLAIM",
+          "summary": "The patch deletes the 'xml' exporter, but a configured scheduled report ('finance-monthly') still specifies format \"xml\", so the scheduler would now throw 'unknown export format: xml' — directly violating the constraint not to break existing scheduled reports.",
+          "claim": {
+            "claim": "The schedule 'finance-monthly' in config/report-schedules.json requests format \"xml\", and src/scheduler.js resolves that format via getExporter(); after the patch getExporter('xml') throws, so the scheduled finance-monthly report breaks.",
+            "severity": "high",
+            "evidence_needed": "A config file containing format \"xml\" plus code showing the scheduler resolves formats through the exporters registry (and ideally a failing test replicating the schedule lookup).",
+            "verification": "Regex search for 'xml' returned config/report-schedules.json:14 (\"format\": \"xml\"), contradicting the proposal's claim that only the registry entry referenced the format. Reading src/scheduler.js:10 shows runSchedule calls getExporter(schedule.format), and src/exporters/index.js:16 now throws 'unknown export format: xml' since the registry only contains csv/json. The existing exporter test file still passes (3/3) because no test covers the schedule-to-registry path, so the defect is hidden from the test suite.",
+            "evidence_refs": [
+              "T1",
+              "T2",
+              "T5",
+              "config/report-schedules.json:14",
+              "src/scheduler.js:10",
+              "src/exporters/index.js:16"
+            ],
+            "result": "confirmed",
+            "verdict": "MODIFY"
+          }
+        },
+        "gate": {
+          "model_verdict": "MODIFY",
+          "final_verdict": "MODIFY",
+          "model_result": "confirmed",
+          "final_result": "confirmed",
+          "status": "validated",
+          "reason": "matched 1 artifact(s): T1:search_hit",
+          "matched": [
+            {
+              "tool_call": "T1",
+              "artifact": {
+                "type": "search_hit",
+                "file": "config/report-schedules.json",
+                "line": 14,
+                "detail": "\"format\": \"xml\","
+              }
+            }
+          ],
+          "verdict_forced": false
+        },
+        "tool_log": [
+          {
+            "id": "T1",
+            "tool": "search",
+            "args": {
+              "pattern": "xml"
+            },
+            "ok": true,
+            "artifacts": [
+              {
+                "type": "search_hit",
+                "file": "config/report-schedules.json",
+                "line": 14,
+                "detail": "\"format\": \"xml\","
+              }
+            ],
+            "output_chars": 72,
+            "ms": 3,
+            "output_preview": "search /xml/: 1 hit(s)\nconfig/report-schedules.json:14: \"format\": \"xml\","
+          },
+          {
+            "id": "T2",
+            "tool": "inspect_config",
+            "args": {
+              "path": "config/report-schedules.json"
+            },
+            "ok": true,
+            "artifacts": [],
+            "output_chars": 708,
+            "ms": 2,
+            "output_preview": "config/report-schedules.json (lines 1-29 of 29)\n   1| {\n   2|   \"schedules\": [\n   3|     {\n   4|       \"name\": \"ops-daily\",\n   5|       \"cron\": \"0 6 * * *\",\n   6|       \"format\": \"csv\",\n   7|       \"recipients\": [\n   8|         \"ops@example.com\"\n   9|       ]\n  10|     },\n  11|     {\n  12|       \"name\": \"finance-monthly\",\n  13|       \"cron\": \"0 7 1 * *\",\n  14|       \"format\": \"xml\",\n  15|       \"recipients\": [\n  16|         \"ledger-import@example.com\"\n  17|       ]\n  18|     },\n  19|     {\n  20|       \"name\": \"growth-weekly\",\n  21|       \"cron\": \"0 8 * * 1\",\n  22|       \"format\": \"json\",\n  23|"
+          },
+          {
+            "id": "T3",
+            "tool": "read_file",
+            "args": {
+              "path": "src/exporters/index.js"
+            },
+            "ok": true,
+            "artifacts": [],
+            "output_chars": 638,
+            "ms": 0,
+            "output_preview": "src/exporters/index.js (lines 1-19 of 19)\n   1| // @ts-check\n   2| import { toCsv } from \"./csv.js\";\n   3| import { toJson } from \"./json.js\";\n   4| \n   5| /** @typedef {(rows: Array<Record<string, string | number>>) => string} Exporter */\n   6| \n   7| /** @type {Record<string, Exporter>} */\n   8| const EXPORTERS = { csv: toCsv, json: toJson };\n   9| \n  10| /**\n  11|  * @param {string} format\n  12|  * @returns {Exporter}\n  13|  */\n  14| export function getExporter(format) {\n  15|   const exporter = EXPORTERS[format];\n  16|   if (!exporter) throw new Error(`unknown export format: ${format}`);\n "
+          },
+          {
+            "id": "T4",
+            "tool": "run_test",
+            "args": {
+              "test_file": "test/exporters.test.js"
+            },
+            "ok": true,
+            "artifacts": [],
+            "output_chars": 55,
+            "ms": 275,
+            "output_preview": "run_test test/exporters.test.js: exit 0, pass 3, fail 0"
+          },
+          {
+            "id": "T5",
+            "tool": "read_file",
+            "args": {
+              "path": "src/scheduler.js"
+            },
+            "ok": true,
+            "artifacts": [],
+            "output_chars": 510,
+            "ms": 1,
+            "output_preview": "src/scheduler.js (lines 1-12 of 12)\n   1| // @ts-check\n   2| import { getExporter } from \"./exporters/index.js\";\n   3| \n   4| /**\n   5|  * Runs scheduled reports. Schedules are loaded from config/report-schedules.json at startup.\n   6|  * @param {{ name: string, format: string }} schedule\n   7|  * @param {Array<Record<string, string | number>>} rows\n   8|  */\n   9| export function runSchedule(schedule, rows) {\n  10|   return { name: schedule.name, body: getExporter(schedule.format)(rows) };\n  11| }\n  12| "
+          }
+        ],
+        "tool_calls_rejected": 0,
+        "meta": {
+          "review_mode": "evidence_gate",
+          "model": "z-ai/glm-5.3-flash",
+          "usage": {
+            "prompt_tokens": 6972,
+            "completion_tokens": 1422,
+            "total_tokens": 8394
+          },
+          "cost_usd": 0.001154656,
+          "turns": 3,
+          "latency_ms": 12987,
+          "forced_final": false,
+          "repaired": false
+        }
+      }
+    },
+    {
+      "case_id": "retry-jitter",
+      "run": 1,
+      "mode": "decision_judge",
+      "model": "z-ai/glm-5.3-flash",
+      "attempts": 1,
+      "retries": [],
+      "ok": true,
+      "usage_all_attempts": {
+        "prompt_tokens": 1057,
+        "completion_tokens": 2672,
+        "total_tokens": 3729
+      },
+      "cost_usd_all_attempts": 0.00141775,
+      "cost_source": "reported",
+      "latency_ms": 96192,
+      "verdict": "MODIFY",
+      "review": {
+        "verdict": "MODIFY",
+        "recommendation": "The jitter mechanism is sound, but the patch silently changes the attempt semantics: the loop bound was changed from `i < opts.attempts` to `attempt <= opts.attempts`, so fn is now invoked up to attempts+1 times. With the provider's hard cap of 3 attempts per charge, chargeWithRetry would make 4 calls and risk merchant throttling — the exact failure this change is meant to prevent, and it contradicts both the JSDoc ('at most attempts times in total') and the claim that 'the number of attempts is unchanged'. Change the loop back to `attempt < opts.attempts` and the sleep condition to `attempt < opts.attempts - 1`, then add a regression test asserting that a always-rejecting fn is called exactly `attempts` times with `attempts - 1` sleeps, each delay within [0, base * 2^attempt].",
+        "critical_assumptions": [
+          "The claim 'the number of attempts is unchanged' — the patched loop bound (`attempt <= opts.attempts`) actually yields attempts+1 calls, so this assumption is false as written",
+          "Existing tests in test/retry.test.js assert call counts (they would fail against the patched loop) and that no caller depends on sleeping after the final failed attempt",
+          "Test environments either inject `random` or tolerate Math.random nondeterminism under fake timers"
+        ],
+        "material_risks": [
+          "During a payment-provider brownout, each charge now makes up to attempts+1 provider calls (4 when attempts=3), exceeding the provider's per-charge limit and triggering merchant account throttling",
+          "Retry-count contracts asserted by existing tests or relied on by other retry() callers are silently violated (backward-compatibility constraint breach)",
+          "The doc comment and implementation now disagree about the total-attempts semantics, inviting future callers to misconfigure attempts"
+        ],
+        "falsification_probe": {
+          "description": "Run: node -e \"import('./src/retry.js').then(async ({retry}) => { let n=0; try { await retry(()=>{n++; throw new Error('x')}, {attempts:3, baseDelayMs:1, sleep:async()=>{}}); } catch {} console.log('calls:', n); })\" and run the existing test/retry.test.js suite",
+          "expected_signal": "The one-liner prints 'calls: 4' (correct old behavior was 3), and/or existing call-count tests fail — either result falsifies the 'attempts unchanged' claim and confirms the attempt-limit violation; after the loop-bound fix it must print 3 and tests must pass"
+        },
+        "confidence": 0.97,
+        "meta": {
+          "review_id": "fd338496-2f15-4bfa-b15d-7d2d38af95ce",
+          "review_mode": "decision_judge",
+          "model": "z-ai/glm-5.3-flash",
+          "phases": 1,
+          "usage": {
+            "prompt_tokens": 1057,
+            "completion_tokens": 2672,
+            "total_tokens": 3729
+          },
+          "latency_ms": 96192
+        }
+      }
+    },
+    {
+      "case_id": "retry-jitter",
+      "run": 1,
+      "mode": "evidence_gate",
+      "model": "z-ai/glm-5.3-flash",
+      "attempts": 1,
+      "retries": [],
+      "ok": true,
+      "usage_all_attempts": {
+        "prompt_tokens": 7532,
+        "completion_tokens": 1709,
+        "total_tokens": 9241
+      },
+      "cost_usd_all_attempts": 0.0011196264,
+      "cost_source": "reported",
+      "latency_ms": 24903,
+      "verdict": "MODIFY",
+      "model_verdict": "MODIFY",
+      "evidence": {
+        "verdict": "MODIFY",
+        "answer": {
+          "decision": "CLAIM",
+          "summary": "The patch changed the loop bound from `i < opts.attempts` to `attempt <= opts.attempts`, so retry() now calls fn attempts+1 times (e.g. 4 provider calls for chargeWithRetry with attempts: 3), violating the 'at most 3 attempts per charge' constraint and breaking the existing test.",
+          "claim": {
+            "claim": "retry() performs opts.attempts + 1 calls to fn instead of opts.attempts, so chargeWithRetry makes 4 provider attempts, exceeding the provider's 3-attempt limit (merchant throttling risk) and breaking existing behaviour.",
+            "severity": "high",
+            "evidence_needed": "A failing test showing the call count for attempts=3, or the off-by-one loop condition in src/retry.js.",
+            "verification": "Ran the existing test suite via run_test: test/retry.test.js fails with 'Expected values to be strictly equal: 4 !== 3' in 'makes exactly `attempts` calls when every call fails'. Read src/retry.js:16 confirms `for (let attempt = 0; attempt <= opts.attempts; attempt++)` while src/charge.js:11 calls retry with attempts: 3.",
+            "evidence_refs": [
+              "T4",
+              "src/retry.js:16",
+              "src/charge.js:11"
+            ],
+            "result": "confirmed",
+            "verdict": "MODIFY"
+          }
+        },
+        "gate": {
+          "model_verdict": "MODIFY",
+          "final_verdict": "MODIFY",
+          "model_result": "confirmed",
+          "final_result": "confirmed",
+          "status": "validated",
+          "reason": "matched 1 artifact(s): T4:failing_test",
+          "matched": [
+            {
+              "tool_call": "T4",
+              "artifact": {
+                "type": "failing_test",
+                "file": "test/retry.test.js",
+                "detail": "makes exactly `attempts` calls when every call fails"
+              }
+            }
+          ],
+          "verdict_forced": false
+        },
+        "tool_log": [
+          {
+            "id": "T1",
+            "tool": "read_file",
+            "args": {
+              "path": "src/retry.js"
+            },
+            "ok": true,
+            "artifacts": [],
+            "output_chars": 1048,
+            "ms": 1,
+            "output_preview": "src/retry.js (lines 1-26 of 26)\n   1| // @ts-check\n   2| \n   3| /**\n   4|  * Call fn until it succeeds, at most `attempts` times in total, with exponential backoff\n   5|  * and full jitter (delay is uniformly random in [0, base * 2^attempt]).\n   6|  * @template T\n   7|  * @param {() => Promise<T>} fn\n   8|  * @param {{ attempts: number, baseDelayMs: number, sleep?: (ms: number) => Promise<void>, random?: () => number }} opts\n   9|  * @returns {Promise<T>}\n  10|  */\n  11| export async function retry(fn, opts) {\n  12|   const sleep = opts.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));"
+          },
+          {
+            "id": "T2",
+            "tool": "read_file",
+            "args": {
+              "path": "src/charge.js"
+            },
+            "ok": true,
+            "artifacts": [],
+            "output_chars": 604,
+            "ms": 1,
+            "output_preview": "src/charge.js (lines 1-13 of 13)\n   1| // @ts-check\n   2| import { retry } from \"./retry.js\";\n   3| \n   4| /**\n   5|  * Charge a card through the payment provider. The provider allows at most 3 attempts per charge\n   6|  * request; more attempts are treated as abuse and the merchant account gets throttled.\n   7|  * @param {(amountCents: number) => Promise<string>} providerCharge\n   8|  * @param {number} amountCents\n   9|  */\n  10| export function chargeWithRetry(providerCharge, amountCents) {\n  11|   return retry(() => providerCharge(amountCents), { attempts: 3, baseDelayMs: 200 });\n  12| }\n  "
+          },
+          {
+            "id": "T3",
+            "tool": "read_file",
+            "args": {
+              "path": "test/retry.test.js"
+            },
+            "ok": true,
+            "artifacts": [],
+            "output_chars": 940,
+            "ms": 1,
+            "output_preview": "test/retry.test.js (lines 1-28 of 28)\n   1| import { test } from \"node:test\";\n   2| import assert from \"node:assert/strict\";\n   3| import { retry } from \"../src/retry.js\";\n   4| \n   5| const noSleep = async () => {};\n   6| \n   7| test(\"returns the first successful result\", async () => {\n   8|   let calls = 0;\n   9|   const value = await retry(async () => {\n  10|     calls++;\n  11|     if (calls < 2) throw new Error(\"boom\");\n  12|     return \"ok\";\n  13|   }, { attempts: 3, baseDelayMs: 1, sleep: noSleep });\n  14|   assert.equal(value, \"ok\");\n  15|   assert.equal(calls, 2);\n  16| });\n  17| \n  18"
+          },
+          {
+            "id": "T4",
+            "tool": "run_test",
+            "args": {
+              "test_file": "test/retry.test.js"
+            },
+            "ok": true,
+            "artifacts": [
+              {
+                "type": "failing_test",
+                "file": "test/retry.test.js",
+                "detail": "makes exactly `attempts` calls when every call fails"
+              }
+            ],
+            "output_chars": 578,
+            "ms": 312,
+            "output_preview": "run_test test/retry.test.js: exit 1, pass 1, fail 1\nfailing: makes exactly `attempts` calls when every call fails\nnot ok 2 - makes exactly `attempts` calls when every call fails\n  ---\n  location: '/tmp/br-evidence-hNwLAy/test/retry.test.js:18:1'\n  failureType: 'testCodeFailure'\n  error: |-\n    Expected values to be strictly equal:\n    \n    4 !== 3\n    \n  code: 'ERR_ASSERTION'\n  name: 'AssertionError'\n  expected: 3\n  actual: 4\n  operator: 'strictEqual'\n  stack: |-\n  ...\n1..2\n# tests 2\n# suites 0\n# pass 1\n# fail 1\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 189.355861\n"
+          }
+        ],
+        "tool_calls_rejected": 0,
+        "meta": {
+          "review_mode": "evidence_gate",
+          "model": "z-ai/glm-5.3-flash",
+          "usage": {
+            "prompt_tokens": 7532,
+            "completion_tokens": 1709,
+            "total_tokens": 9241
+          },
+          "cost_usd": 0.0011196264,
+          "turns": 3,
+          "latency_ms": 24903,
+          "forced_final": false,
+          "repaired": false
+        }
+      }
+    }
+  ]
+}

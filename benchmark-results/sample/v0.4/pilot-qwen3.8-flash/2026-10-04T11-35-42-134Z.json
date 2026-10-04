@@ -1,0 +1,626 @@
+{
+  "schema": "blindreview-repo-benchmark/v1",
+  "label": "pilot-qwen3.8-flash",
+  "created_at": "2026-10-04T11:35:42.134Z",
+  "git": {
+    "sha": "a77933d2514a074927f518e78d1629699e563f0c",
+    "dirty": false
+  },
+  "model": "qwen/qwen3.8-flash",
+  "base_url_host": "openrouter.ai",
+  "config": {
+    "evidence_limits": {
+      "maxToolCalls": 8,
+      "maxReviewTokens": 80000,
+      "maxTokensPerCall": 4000,
+      "timeoutMs": 300000
+    },
+    "text_max_review_tokens": 24000,
+    "text_max_tokens_per_call": 6000,
+    "reasoning_effort": null,
+    "temperature": null,
+    "retries": 2,
+    "concurrency": 3
+  },
+  "pricing": {
+    "prompt": 1.5e-7,
+    "completion": 4.7e-7
+  },
+  "case_set_hash": "2239b07cb5552217-subset3",
+  "case_count": 3,
+  "prompt_hashes": {
+    "proposal_first": "86399d1d74424d49",
+    "proposal_first_2pass": "babc3ad0bb43463c",
+    "blind_first": "d62bdbaf1e4a7d18",
+    "repair": "1cd5c9f17886635b",
+    "independent_only": "16d4fca86343b220",
+    "decision_judge": "60b581a50444a02e",
+    "evidence_gate": "27b99c0914be4874"
+  },
+  "modes": [
+    "evidence_gate",
+    "decision_judge"
+  ],
+  "runs": 1,
+  "seed": 42,
+  "records": [
+    {
+      "case_id": "csv-rfc4180-quoting",
+      "run": 1,
+      "mode": "decision_judge",
+      "model": "qwen/qwen3.8-flash",
+      "attempts": 1,
+      "retries": [],
+      "ok": true,
+      "usage_all_attempts": {
+        "prompt_tokens": 1133,
+        "completion_tokens": 1620,
+        "total_tokens": 2753
+      },
+      "cost_usd_all_attempts": 0.00093135,
+      "cost_source": "reported",
+      "latency_ms": 30497,
+      "verdict": "KEEP",
+      "review": {
+        "verdict": "KEEP",
+        "recommendation": "Ship this patch; it implements RFC 4180 field quoting minimally and preserves plain fields byte-for-byte. If the internal parser proves to require CRLF inside quoted fields, consider normalizing embedded LF to CRLF, but that is not required by the stated RFC 4180 constraint.",
+        "critical_assumptions": [
+          "The ETL parser accepts quoted fields containing bare LF, not only CRLF.",
+          "CSV values are string/number/null, or String() conversion is acceptable for any unexpected runtime values.",
+          "The parser treats quoted empty strings and unquoted empty strings equivalently where relevant.",
+          "No consumer depends on the old buggy behavior where commas inside free text split columns."
+        ],
+        "material_risks": [
+          "If the internal RFC 4180 parser is stricter about line breaks inside quoted fields, embedded LF could still cause import failures.",
+          "If callers pass objects instead of strings/numbers/null, String(value) may emit '[object Object]', though this is outside the declared JSDoc types."
+        ],
+        "falsification_probe": {
+          "description": "Add a parser test or call the actual ETL importer on a CSV where a quoted field contains only LF, e.g. toCsv([\"note\"], [[\"line1\\nline2\"]]).",
+          "expected_signal": "If the importer parses the row as one field containing the newline, the patch is correct; if it truncates, errors, or treats LF as a record break despite quoting, the embedded newline should be normalized to CRLF."
+        },
+        "confidence": 0.93,
+        "meta": {
+          "review_id": "b4d84994-7b07-41f1-af11-6084965f4efb",
+          "review_mode": "decision_judge",
+          "model": "qwen/qwen3.8-flash",
+          "phases": 1,
+          "usage": {
+            "prompt_tokens": 1133,
+            "completion_tokens": 1620,
+            "total_tokens": 2753
+          },
+          "latency_ms": 30497
+        }
+      }
+    },
+    {
+      "case_id": "csv-rfc4180-quoting",
+      "run": 1,
+      "mode": "evidence_gate",
+      "model": "qwen/qwen3.8-flash",
+      "attempts": 1,
+      "retries": [],
+      "ok": true,
+      "usage_all_attempts": {
+        "prompt_tokens": 9799,
+        "completion_tokens": 952,
+        "total_tokens": 10751
+      },
+      "cost_usd_all_attempts": 0.0008538659999999999,
+      "cost_source": "reported",
+      "latency_ms": 20889,
+      "verdict": "KEEP",
+      "model_verdict": "KEEP",
+      "evidence": {
+        "verdict": "KEEP",
+        "answer": {
+          "decision": "KEEP",
+          "summary": "csvField implements RFC 4180 quoting (quote fields containing comma, double quote, CR or LF; double embedded quotes) and leaves plain fields byte-identical. Existing and new tests pass and typecheck is clean; toCsv has no other callers in the snapshot.",
+          "claim": null
+        },
+        "gate": {
+          "model_verdict": "KEEP",
+          "final_verdict": "KEEP",
+          "model_result": null,
+          "final_result": null,
+          "status": "no_claim",
+          "reason": "no material defect claimed",
+          "matched": [],
+          "verdict_forced": false
+        },
+        "tool_log": [
+          {
+            "id": "T1",
+            "tool": "read_file",
+            "args": {
+              "path": "src/csv.js"
+            },
+            "ok": true,
+            "artifacts": [],
+            "output_chars": 649,
+            "ms": 1,
+            "output_preview": "src/csv.js (lines 1-19 of 19)\n   1| // @ts-check\n   2| \n   3| /**\n   4|  * RFC 4180 field: quote when it contains a comma, double quote, CR or LF; double embedded quotes.\n   5|  * @param {string | number | null} value\n   6|  */\n   7| export function csvField(value) {\n   8|   const s = String(value ?? \"\");\n   9|   return /[\",\\r\\n]/.test(s) ? `\"${s.replace(/\"/g, '\"\"')}\"` : s;\n  10| }\n  11| \n  12| /**\n  13|  * @param {string[]} header\n  14|  * @param {Array<Array<string | number | null>>} rows\n  15|  */\n  16| export function toCsv(header, rows) {\n  17|   return [header, ...rows].map((r) => r.map("
+          },
+          {
+            "id": "T2",
+            "tool": "run_test",
+            "args": {
+              "test_file": "test/csv.test.js"
+            },
+            "ok": true,
+            "artifacts": [],
+            "output_chars": 49,
+            "ms": 270,
+            "output_preview": "run_test test/csv.test.js: exit 0, pass 2, fail 0"
+          },
+          {
+            "id": "T3",
+            "tool": "search",
+            "args": {
+              "pattern": "toCsv|csvField|csv"
+            },
+            "ok": true,
+            "artifacts": [
+              {
+                "type": "search_hit",
+                "file": "src/csv.js",
+                "line": 7,
+                "detail": "export function csvField(value) {"
+              },
+              {
+                "type": "search_hit",
+                "file": "src/csv.js",
+                "line": 16,
+                "detail": "export function toCsv(header, rows) {"
+              },
+              {
+                "type": "search_hit",
+                "file": "src/csv.js",
+                "line": 17,
+                "detail": "return [header, ...rows].map((r) => r.map(csvField).join(\",\")).join(\"\\r\\n\");"
+              },
+              {
+                "type": "search_hit",
+                "file": "test/csv.test.js",
+                "line": 3,
+                "detail": "import { toCsv } from \"../src/csv.js\";"
+              },
+              {
+                "type": "search_hit",
+                "file": "test/csv.test.js",
+                "line": 6,
+                "detail": "assert.equal(toCsv([\"a\", \"b\"], [[1, \"x\"], [2, null]]), \"a,b\\r\\n1,x\\r\\n2,\");"
+              },
+              {
+                "type": "search_hit",
+                "file": "test/csv.test.js",
+                "line": 10,
+                "detail": "assert.equal(toCsv([\"note\"], [[\"a,b\"], ['say \"hi\"'], [\"line1\\nline2\"]]), 'note\\r\\n\"a,b\"\\r\\n\"say \"\"hi\"\"\"\\r\\n\"line1\\nline2\"');"
+              }
+            ],
+            "output_chars": 531,
+            "ms": 3,
+            "output_preview": "search /toCsv|csvField|csv/: 6 hit(s)\nsrc/csv.js:7: export function csvField(value) {\nsrc/csv.js:16: export function toCsv(header, rows) {\nsrc/csv.js:17: return [header, ...rows].map((r) => r.map(csvField).join(\",\")).join(\"\\r\\n\");\ntest/csv.test.js:3: import { toCsv } from \"../src/csv.js\";\ntest/csv.test.js:6: assert.equal(toCsv([\"a\", \"b\"], [[1, \"x\"], [2, null]]), \"a,b\\r\\n1,x\\r\\n2,\");\ntest/csv.test.js:10: assert.equal(toCsv([\"note\"], [[\"a,b\"], ['say \"hi\"'], [\"line1\\nline2\"]]), 'note\\r\\n\"a,b\"\\r\\n\"say \"\"hi\"\"\"\\r\\n\"line1\\nline2\"');"
+          },
+          {
+            "id": "T4",
+            "tool": "typecheck",
+            "args": {},
+            "ok": true,
+            "artifacts": [],
+            "output_chars": 20,
+            "ms": 686,
+            "output_preview": "typecheck: no errors"
+          }
+        ],
+        "tool_calls_rejected": 0,
+        "meta": {
+          "review_mode": "evidence_gate",
+          "model": "qwen/qwen3.8-flash",
+          "usage": {
+            "prompt_tokens": 9799,
+            "completion_tokens": 952,
+            "total_tokens": 10751
+          },
+          "cost_usd": 0.0008538659999999999,
+          "turns": 4,
+          "latency_ms": 20889,
+          "forced_final": false,
+          "repaired": false
+        }
+      }
+    },
+    {
+      "case_id": "remove-xml-exporter",
+      "run": 1,
+      "mode": "decision_judge",
+      "model": "qwen/qwen3.8-flash",
+      "attempts": 2,
+      "retries": [
+        {
+          "code": "PROVIDER_NETWORK_ERROR",
+          "message": "Network error calling provider: Body is unusable: Body has already been read"
+        }
+      ],
+      "ok": true,
+      "usage_all_attempts": {
+        "prompt_tokens": 1196,
+        "completion_tokens": 2828,
+        "total_tokens": 4024
+      },
+      "cost_usd_all_attempts": 0.004370744,
+      "cost_source": "reported",
+      "latency_ms": 59450,
+      "verdict": "MODIFY",
+      "review": {
+        "verdict": "MODIFY",
+        "recommendation": "The deletion direction is sound, but before merging verify that no active schedule or external on-demand caller requests format=\"xml\", especially in config/report-schedules.json. If any such reference exists, migrate it to CSV/JSON first, or keep a temporary fallback/alias for one release, then delete the exporter.",
+        "critical_assumptions": [
+          "config/report-schedules.json contains no entries using format \"xml\".",
+          "No external API clients, bookmarks, or integrations request XML reports even if the web UI no longer offers it.",
+          "The exporter registry is the only mechanism used by the scheduler to resolve report formats.",
+          "Unknown-format handling throws visibly rather than silently failing, so any missed reference is a report outage.",
+          "The removed XML test is not relied upon for any other regression coverage."
+        ],
+        "material_risks": [
+          "An existing scheduled report using XML will fail on its next run after the patch.",
+          "On-demand users or API clients requesting XML will receive a runtime error.",
+          "External consumers expecting XML output may break without notice.",
+          "The patch can pass unit tests while still failing in production if config-based formats are not covered.",
+          "There may be no migration/deprecation path for schedules created before the UI restriction."
+        ],
+        "falsification_probe": {
+          "description": "Inspect report schedules and search the repo for string references to the XML format, e.g. `jq '.[] | select(.format == \"xml\")' config/report-schedules.json` and `grep -R \"xml\" src config test`.",
+          "expected_signal": "If the probe finds no active schedule or external contract using \"xml\", the deletion is compatible; any matching scheduled report or client contract falsifies the proposal as safe."
+        },
+        "confidence": 0.85,
+        "meta": {
+          "review_id": "2fba04aa-e5fc-48f7-bfbc-ed7e264d4418",
+          "review_mode": "decision_judge",
+          "model": "qwen/qwen3.8-flash",
+          "phases": 1,
+          "usage": {
+            "prompt_tokens": 1196,
+            "completion_tokens": 2828,
+            "total_tokens": 4024
+          },
+          "latency_ms": 59450
+        }
+      }
+    },
+    {
+      "case_id": "remove-xml-exporter",
+      "run": 1,
+      "mode": "evidence_gate",
+      "model": "qwen/qwen3.8-flash",
+      "attempts": 1,
+      "retries": [],
+      "ok": true,
+      "usage_all_attempts": {
+        "prompt_tokens": 10782,
+        "completion_tokens": 1229,
+        "total_tokens": 12011
+      },
+      "cost_usd_all_attempts": 0.001062898,
+      "cost_source": "reported",
+      "latency_ms": 27695,
+      "verdict": "MODIFY",
+      "model_verdict": "MODIFY",
+      "evidence": {
+        "verdict": "MODIFY",
+        "answer": {
+          "decision": "CLAIM",
+          "summary": "The premise that the XML exporter has no users is false: config/report-schedules.json registers the scheduled \"finance-monthly\" report with format \"xml\", so deleting the exporter makes that scheduled report throw at runtime, violating the stated constraint.",
+          "claim": {
+            "claim": "Removing the xml exporter breaks the existing scheduled report \"finance-monthly\" (config/report-schedules.json format: \"xml\"); runSchedule -> getExporter(\"xml\") now throws \"unknown export format: xml\", so the schedule produces no report.",
+            "severity": "critical",
+            "evidence_needed": "A config/schedule entry with format \"xml\" plus the scheduler's use of getExporter(schedule.format) and the registry's throw on unknown formats after the patch.",
+            "verification": "Searched the repo for 'xml' (T2): the only remaining reference is config/report-schedules.json:14 \"format\": \"xml\" (schedule 'finance-monthly', recipient ledger-import@example.com). Read src/scheduler.js (T3) showing runSchedule calls getExporter(schedule.format)(rows), and src/exporters/index.js (T4) showing the post-patch registry only contains csv/json and getExporter throws for unknown formats. Ran test/exporters.test.js (T5): 3 pass / 0 fail — the unit tests pass but there is no schedule-level test, so green tests do not cover this regression.",
+            "evidence_refs": [
+              "T2",
+              "config/report-schedules.json:14",
+              "src/scheduler.js:10",
+              "src/exporters/index.js:8",
+              "src/exporters/index.js:16",
+              "T5"
+            ],
+            "result": "confirmed",
+            "verdict": "MODIFY"
+          }
+        },
+        "gate": {
+          "model_verdict": "MODIFY",
+          "final_verdict": "MODIFY",
+          "model_result": "confirmed",
+          "final_result": "confirmed",
+          "status": "validated",
+          "reason": "matched 1 artifact(s): T2:search_hit",
+          "matched": [
+            {
+              "tool_call": "T2",
+              "artifact": {
+                "type": "search_hit",
+                "file": "config/report-schedules.json",
+                "line": 14,
+                "detail": "\"format\": \"xml\","
+              }
+            }
+          ],
+          "verdict_forced": false
+        },
+        "tool_log": [
+          {
+            "id": "T1",
+            "tool": "read_file",
+            "args": {
+              "path": "config/report-schedules.json"
+            },
+            "ok": true,
+            "artifacts": [],
+            "output_chars": 708,
+            "ms": 1,
+            "output_preview": "config/report-schedules.json (lines 1-29 of 29)\n   1| {\n   2|   \"schedules\": [\n   3|     {\n   4|       \"name\": \"ops-daily\",\n   5|       \"cron\": \"0 6 * * *\",\n   6|       \"format\": \"csv\",\n   7|       \"recipients\": [\n   8|         \"ops@example.com\"\n   9|       ]\n  10|     },\n  11|     {\n  12|       \"name\": \"finance-monthly\",\n  13|       \"cron\": \"0 7 1 * *\",\n  14|       \"format\": \"xml\",\n  15|       \"recipients\": [\n  16|         \"ledger-import@example.com\"\n  17|       ]\n  18|     },\n  19|     {\n  20|       \"name\": \"growth-weekly\",\n  21|       \"cron\": \"0 8 * * 1\",\n  22|       \"format\": \"json\",\n  23|"
+          },
+          {
+            "id": "T2",
+            "tool": "search",
+            "args": {
+              "pattern": "xml"
+            },
+            "ok": true,
+            "artifacts": [
+              {
+                "type": "search_hit",
+                "file": "config/report-schedules.json",
+                "line": 14,
+                "detail": "\"format\": \"xml\","
+              }
+            ],
+            "output_chars": 72,
+            "ms": 3,
+            "output_preview": "search /xml/: 1 hit(s)\nconfig/report-schedules.json:14: \"format\": \"xml\","
+          },
+          {
+            "id": "T3",
+            "tool": "read_file",
+            "args": {
+              "path": "src/scheduler.js"
+            },
+            "ok": true,
+            "artifacts": [],
+            "output_chars": 510,
+            "ms": 1,
+            "output_preview": "src/scheduler.js (lines 1-12 of 12)\n   1| // @ts-check\n   2| import { getExporter } from \"./exporters/index.js\";\n   3| \n   4| /**\n   5|  * Runs scheduled reports. Schedules are loaded from config/report-schedules.json at startup.\n   6|  * @param {{ name: string, format: string }} schedule\n   7|  * @param {Array<Record<string, string | number>>} rows\n   8|  */\n   9| export function runSchedule(schedule, rows) {\n  10|   return { name: schedule.name, body: getExporter(schedule.format)(rows) };\n  11| }\n  12| "
+          },
+          {
+            "id": "T4",
+            "tool": "read_file",
+            "args": {
+              "path": "src/exporters/index.js"
+            },
+            "ok": true,
+            "artifacts": [],
+            "output_chars": 638,
+            "ms": 1,
+            "output_preview": "src/exporters/index.js (lines 1-19 of 19)\n   1| // @ts-check\n   2| import { toCsv } from \"./csv.js\";\n   3| import { toJson } from \"./json.js\";\n   4| \n   5| /** @typedef {(rows: Array<Record<string, string | number>>) => string} Exporter */\n   6| \n   7| /** @type {Record<string, Exporter>} */\n   8| const EXPORTERS = { csv: toCsv, json: toJson };\n   9| \n  10| /**\n  11|  * @param {string} format\n  12|  * @returns {Exporter}\n  13|  */\n  14| export function getExporter(format) {\n  15|   const exporter = EXPORTERS[format];\n  16|   if (!exporter) throw new Error(`unknown export format: ${format}`);\n "
+          },
+          {
+            "id": "T5",
+            "tool": "run_test",
+            "args": {
+              "test_file": "test/exporters.test.js"
+            },
+            "ok": true,
+            "artifacts": [],
+            "output_chars": 55,
+            "ms": 277,
+            "output_preview": "run_test test/exporters.test.js: exit 0, pass 3, fail 0"
+          }
+        ],
+        "tool_calls_rejected": 0,
+        "meta": {
+          "review_mode": "evidence_gate",
+          "model": "qwen/qwen3.8-flash",
+          "usage": {
+            "prompt_tokens": 10782,
+            "completion_tokens": 1229,
+            "total_tokens": 12011
+          },
+          "cost_usd": 0.001062898,
+          "turns": 4,
+          "latency_ms": 27695,
+          "forced_final": false,
+          "repaired": false
+        }
+      }
+    },
+    {
+      "case_id": "retry-jitter",
+      "run": 1,
+      "mode": "decision_judge",
+      "model": "qwen/qwen3.8-flash",
+      "attempts": 2,
+      "retries": [
+        {
+          "code": "PROVIDER_NETWORK_ERROR",
+          "message": "Network error calling provider: Body is unusable: Body has already been read"
+        }
+      ],
+      "ok": true,
+      "usage_all_attempts": {
+        "prompt_tokens": 1152,
+        "completion_tokens": 1766,
+        "total_tokens": 2918
+      },
+      "cost_usd_all_attempts": 0.001964304,
+      "cost_source": "reported",
+      "latency_ms": 41342,
+      "verdict": "MODIFY",
+      "review": {
+        "verdict": "MODIFY",
+        "recommendation": "Keep full jitter and the optional random hook, but fix the retry count: loop with attempt < opts.attempts and sleep only when attempt < opts.attempts - 1. The current loop condition calls fn opts.attempts + 1 times, so a configured 3-attempt charge can make 4 provider attempts and trigger throttling. Add a regression test proving always-failing fn is called exactly opts.attempts times.",
+        "critical_assumptions": [
+          "opts.attempts means total provider calls including the first attempt, as stated in the original JSDoc.",
+          "random() returns a value in [0, 1), so Math.round(random() * cap) produces a nonnegative jitter delay.",
+          "Backward compatibility requires no change in total retry attempts for existing callers.",
+          "callers may pass attempts: 0, even though the payment-provider constraint is at most 3 attempts.",
+          "the repository snapshot test suite would catch only timing or delay behavior, not necessarily an extra final attempt."
+        ],
+        "material_risks": [
+          "The merchant account can be throttled by the payment provider because chargeWithRetry could make 4 attempts when only 3 are allowed.",
+          "With attempts: 0, the patched helper makes one call instead of none, violating the helper’s contract.",
+          "A sleep can occur after the final failed attempt if the loop is fixed without also fixing the sleep condition, unnecessarily delaying errors.",
+          "Existing callers relying on exact retry count may exceed provider limits during brownout, worsening the incident."
+        ],
+        "falsification_probe": {
+          "description": "Unit test src/retry.js by calling await retry(() => Promise.reject(new Error('x')), { attempts: 3, baseDelayMs: 0, sleep: async () => {} }) and counting fn calls.",
+          "expected_signal": "The proposed patch falsifies the claim of unchanged attempts: fn is called 4 times; a correct implementation calls it exactly 3 times."
+        },
+        "confidence": 0.99,
+        "meta": {
+          "review_id": "111e13fd-a30a-45d9-a702-f509067af990",
+          "review_mode": "decision_judge",
+          "model": "qwen/qwen3.8-flash",
+          "phases": 1,
+          "usage": {
+            "prompt_tokens": 1152,
+            "completion_tokens": 1766,
+            "total_tokens": 2918
+          },
+          "latency_ms": 41342
+        }
+      }
+    },
+    {
+      "case_id": "retry-jitter",
+      "run": 1,
+      "mode": "evidence_gate",
+      "model": "qwen/qwen3.8-flash",
+      "attempts": 1,
+      "retries": [],
+      "ok": true,
+      "usage_all_attempts": {
+        "prompt_tokens": 11576,
+        "completion_tokens": 902,
+        "total_tokens": 12478
+      },
+      "cost_usd_all_attempts": 0.0010969159999999999,
+      "cost_source": "reported",
+      "latency_ms": 20412,
+      "verdict": "MODIFY",
+      "model_verdict": "MODIFY",
+      "evidence": {
+        "verdict": "MODIFY",
+        "answer": {
+          "decision": "CLAIM",
+          "summary": "Full-jitter backoff and the optional `random` hook look fine and the signature stays backward compatible, but the rewritten loop bound (`attempt <= opts.attempts`) makes one extra call: `attempts: 3` now invokes `fn` 4 times, breaking the existing test and violating the provider's 3-attempt cap.",
+          "claim": {
+            "claim": "retry() now calls fn opts.attempts + 1 times instead of opts.attempts times, so chargeWithRetry (attempts: 3) sends 4 charge attempts and exceeds the payment provider's limit (and the existing test asserting exactly 3 calls fails).",
+            "severity": "critical",
+            "evidence_needed": "Run test/retry.test.js: the 'makes exactly `attempts` calls when every call fails' assertion compares the observed call count against 3; also confirm the loop bound in src/retry.js and the attempts: 3 caller in src/charge.js.",
+            "verification": "run_test on test/retry.test.js exited 1 with '4 !== 3' for the all-failures test. src/retry.js:16 loops `for (let attempt = 0; attempt <= opts.attempts; attempt++)` and src/retry.js:21 only sleeps (and the loop only exits after the extra iteration) while still calling fn, so fn runs attempts+1 times. src/charge.js:11-12 passes attempts: 3, matching the provider's hard cap.",
+            "evidence_refs": [
+              "T3",
+              "src/retry.js:16",
+              "src/retry.js:21",
+              "src/charge.js:12",
+              "test/retry.test.js:26"
+            ],
+            "result": "confirmed",
+            "verdict": "MODIFY"
+          }
+        },
+        "gate": {
+          "model_verdict": "MODIFY",
+          "final_verdict": "MODIFY",
+          "model_result": "confirmed",
+          "final_result": "confirmed",
+          "status": "validated",
+          "reason": "matched 1 artifact(s): T3:failing_test",
+          "matched": [
+            {
+              "tool_call": "T3",
+              "artifact": {
+                "type": "failing_test",
+                "file": "test/retry.test.js",
+                "detail": "makes exactly `attempts` calls when every call fails"
+              }
+            }
+          ],
+          "verdict_forced": false
+        },
+        "tool_log": [
+          {
+            "id": "T1",
+            "tool": "read_file",
+            "args": {
+              "path": "src/retry.js"
+            },
+            "ok": true,
+            "artifacts": [],
+            "output_chars": 1048,
+            "ms": 3,
+            "output_preview": "src/retry.js (lines 1-26 of 26)\n   1| // @ts-check\n   2| \n   3| /**\n   4|  * Call fn until it succeeds, at most `attempts` times in total, with exponential backoff\n   5|  * and full jitter (delay is uniformly random in [0, base * 2^attempt]).\n   6|  * @template T\n   7|  * @param {() => Promise<T>} fn\n   8|  * @param {{ attempts: number, baseDelayMs: number, sleep?: (ms: number) => Promise<void>, random?: () => number }} opts\n   9|  * @returns {Promise<T>}\n  10|  */\n  11| export async function retry(fn, opts) {\n  12|   const sleep = opts.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));"
+          },
+          {
+            "id": "T2",
+            "tool": "read_file",
+            "args": {
+              "path": "test/retry.test.js"
+            },
+            "ok": true,
+            "artifacts": [],
+            "output_chars": 940,
+            "ms": 1,
+            "output_preview": "test/retry.test.js (lines 1-28 of 28)\n   1| import { test } from \"node:test\";\n   2| import assert from \"node:assert/strict\";\n   3| import { retry } from \"../src/retry.js\";\n   4| \n   5| const noSleep = async () => {};\n   6| \n   7| test(\"returns the first successful result\", async () => {\n   8|   let calls = 0;\n   9|   const value = await retry(async () => {\n  10|     calls++;\n  11|     if (calls < 2) throw new Error(\"boom\");\n  12|     return \"ok\";\n  13|   }, { attempts: 3, baseDelayMs: 1, sleep: noSleep });\n  14|   assert.equal(value, \"ok\");\n  15|   assert.equal(calls, 2);\n  16| });\n  17| \n  18"
+          },
+          {
+            "id": "T3",
+            "tool": "run_test",
+            "args": {
+              "test_file": "test/retry.test.js"
+            },
+            "ok": true,
+            "artifacts": [
+              {
+                "type": "failing_test",
+                "file": "test/retry.test.js",
+                "detail": "makes exactly `attempts` calls when every call fails"
+              }
+            ],
+            "output_chars": 577,
+            "ms": 289,
+            "output_preview": "run_test test/retry.test.js: exit 1, pass 1, fail 1\nfailing: makes exactly `attempts` calls when every call fails\nnot ok 2 - makes exactly `attempts` calls when every call fails\n  ---\n  location: '/tmp/br-evidence-ggaBIB/test/retry.test.js:18:1'\n  failureType: 'testCodeFailure'\n  error: |-\n    Expected values to be strictly equal:\n    \n    4 !== 3\n    \n  code: 'ERR_ASSERTION'\n  name: 'AssertionError'\n  expected: 3\n  actual: 4\n  operator: 'strictEqual'\n  stack: |-\n  ...\n1..2\n# tests 2\n# suites 0\n# pass 1\n# fail 1\n# cancelled 0\n# skipped 0\n# todo 0\n# duration_ms 160.28185\n"
+          },
+          {
+            "id": "T4",
+            "tool": "read_file",
+            "args": {
+              "path": "src/charge.js"
+            },
+            "ok": true,
+            "artifacts": [],
+            "output_chars": 604,
+            "ms": 1,
+            "output_preview": "src/charge.js (lines 1-13 of 13)\n   1| // @ts-check\n   2| import { retry } from \"./retry.js\";\n   3| \n   4| /**\n   5|  * Charge a card through the payment provider. The provider allows at most 3 attempts per charge\n   6|  * request; more attempts are treated as abuse and the merchant account gets throttled.\n   7|  * @param {(amountCents: number) => Promise<string>} providerCharge\n   8|  * @param {number} amountCents\n   9|  */\n  10| export function chargeWithRetry(providerCharge, amountCents) {\n  11|   return retry(() => providerCharge(amountCents), { attempts: 3, baseDelayMs: 200 });\n  12| }\n  "
+          }
+        ],
+        "tool_calls_rejected": 0,
+        "meta": {
+          "review_mode": "evidence_gate",
+          "model": "qwen/qwen3.8-flash",
+          "usage": {
+            "prompt_tokens": 11576,
+            "completion_tokens": 902,
+            "total_tokens": 12478
+          },
+          "cost_usd": 0.0010969159999999999,
+          "turns": 4,
+          "latency_ms": 20412,
+          "forced_final": false,
+          "repaired": false
+        }
+      }
+    }
+  ]
+}

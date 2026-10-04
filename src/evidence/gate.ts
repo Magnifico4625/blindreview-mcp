@@ -34,6 +34,18 @@ export function normalizeGateAnswer(value: unknown): unknown {
   if (value === null || typeof value !== "object") return value;
   const v = { ...(value as Record<string, unknown>) };
   if (typeof v.decision === "string") v.decision = v.decision.trim().toUpperCase();
+  // Some models flatten the claim: {"decision":"CLAIM","claim":"text","severity":...,"verdict":...}
+  if (typeof v.claim === "string") {
+    const flat: Record<string, unknown> = { claim: v.claim };
+    for (const k of ["severity", "evidence_needed", "verification", "evidence_refs", "result", "verdict"]) {
+      if (k in v) {
+        flat[k] = v[k];
+        delete v[k];
+      }
+    }
+    v.claim = flat;
+  }
+  if (v.decision === undefined && v.claim && typeof v.claim === "object") v.decision = "CLAIM";
   if (v.claim && typeof v.claim === "object") {
     const c = { ...(v.claim as Record<string, unknown>) };
     if (typeof c.verdict === "string") c.verdict = c.verdict.trim().toUpperCase();

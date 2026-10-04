@@ -1,0 +1,324 @@
+{
+  "schema": "blindreview-repo-benchmark/v1",
+  "label": "pilot-glm-5.3-flash",
+  "created_at": "2026-10-04T11:35:45.642Z",
+  "git": {
+    "sha": "a77933d2514a074927f518e78d1629699e563f0c",
+    "dirty": false
+  },
+  "model": "z-ai/glm-5.3-flash",
+  "base_url_host": "openrouter.ai",
+  "config": {
+    "evidence_limits": {
+      "maxToolCalls": 8,
+      "maxReviewTokens": 80000,
+      "maxTokensPerCall": 4000,
+      "timeoutMs": 300000
+    },
+    "text_max_review_tokens": 24000,
+    "text_max_tokens_per_call": 6000,
+    "reasoning_effort": null,
+    "temperature": null,
+    "retries": 2,
+    "concurrency": 3
+  },
+  "pricing": {
+    "prompt": 1.5e-7,
+    "completion": 5e-7
+  },
+  "case_set_hash": "2239b07cb5552217-subset3",
+  "case_count": 3,
+  "prompt_hashes": {
+    "proposal_first": "86399d1d74424d49",
+    "proposal_first_2pass": "babc3ad0bb43463c",
+    "blind_first": "d62bdbaf1e4a7d18",
+    "repair": "1cd5c9f17886635b",
+    "independent_only": "16d4fca86343b220",
+    "decision_judge": "60b581a50444a02e",
+    "evidence_gate": "27b99c0914be4874"
+  },
+  "modes": [
+    "evidence_gate",
+    "decision_judge"
+  ],
+  "runs": 1,
+  "seed": 42,
+  "records": [
+    {
+      "case_id": "csv-rfc4180-quoting",
+      "run": 1,
+      "mode": "decision_judge",
+      "model": "z-ai/glm-5.3-flash",
+      "attempts": 1,
+      "retries": [],
+      "ok": true,
+      "usage_all_attempts": {
+        "prompt_tokens": 1034,
+        "completion_tokens": 1758,
+        "total_tokens": 2792
+      },
+      "cost_usd_all_attempts": 0.0010341,
+      "cost_source": "reported",
+      "latency_ms": 40351,
+      "verdict": "KEEP",
+      "review": {
+        "verdict": "KEEP",
+        "recommendation": "The patch correctly implements RFC 4180 quoting: fields containing comma, double quote, CR, or LF are wrapped in quotes with embedded quotes doubled, while plain fields pass through unchanged (String(v ?? \"\") semantics preserved), satisfying the byte-identical constraint. The added test covers the three special cases. One optional hardening: add a round-trip test asserting a strict RFC 4180 parser (e.g., a well-known CSV parser) recovers the original field values from toCsv output.",
+        "critical_assumptions": [
+          "The ETL importer's RFC 4180 parser accepts quoted fields containing a bare LF (not only CRLF), since free-text notes may contain LF and the patch preserves them verbatim.",
+          "toCsv output has no consumers other than the internal ETL importer (per the stated constraint).",
+          "Row/header values are always string, number, or null as declared; undefined or objects never reach csvField."
+        ],
+        "material_risks": [
+          "A hyper-strict RFC 4180 ABNF parser could reject a quoted field containing a bare LF (the ABNF formally allows only CRLF inside quoted fields); in practice virtually all parsers accept it, and converting LF to CRLF would mutate data."
+        ],
+        "falsification_probe": {
+          "description": "Run `node --test test/csv.test.js` in the repo, plus a quick round-trip check: parse the toCsv output of [['a,b'], ['say \"hi\"'], ['line1\\nline2']] with a strict RFC 4180 parser and compare against the inputs.",
+          "expected_signal": "Falsified if any test fails or the parser returns fields differing from the originals (e.g., LF inside quotes rejected or quote-doubling mishandled); confirmed if all tests pass and round-trip values match exactly."
+        },
+        "confidence": 0.93,
+        "meta": {
+          "review_id": "c88d3406-41ba-4b66-bc6e-dd8ff9f2ed05",
+          "review_mode": "decision_judge",
+          "model": "z-ai/glm-5.3-flash",
+          "phases": 1,
+          "usage": {
+            "prompt_tokens": 1034,
+            "completion_tokens": 1758,
+            "total_tokens": 2792
+          },
+          "latency_ms": 40351
+        }
+      }
+    },
+    {
+      "case_id": "csv-rfc4180-quoting",
+      "run": 1,
+      "mode": "evidence_gate",
+      "model": "z-ai/glm-5.3-flash",
+      "attempts": 1,
+      "retries": [],
+      "ok": true,
+      "usage_all_attempts": {
+        "prompt_tokens": 3811,
+        "completion_tokens": 794,
+        "total_tokens": 4605
+      },
+      "cost_usd_all_attempts": 0.000505804,
+      "cost_source": "reported",
+      "latency_ms": 22160,
+      "verdict": "KEEP",
+      "model_verdict": "KEEP",
+      "evidence": {
+        "verdict": "KEEP",
+        "answer": {
+          "decision": "KEEP",
+          "summary": "The patch correctly implements RFC 4180 field escaping (quote on comma/quote/CR/LF, doubled embedded quotes) while leaving plain fields byte-identical to the previous String(v ?? \"\") output; both tests pass.",
+          "claim": null
+        },
+        "gate": {
+          "model_verdict": "KEEP",
+          "final_verdict": "KEEP",
+          "model_result": null,
+          "final_result": null,
+          "status": "no_claim",
+          "reason": "no material defect claimed",
+          "matched": [],
+          "verdict_forced": false
+        },
+        "tool_log": [
+          {
+            "id": "T1",
+            "tool": "run_test",
+            "args": {
+              "test_file": "test/csv.test.js"
+            },
+            "ok": true,
+            "artifacts": [],
+            "output_chars": 49,
+            "ms": 293,
+            "output_preview": "run_test test/csv.test.js: exit 0, pass 2, fail 0"
+          },
+          {
+            "id": "T2",
+            "tool": "read_file",
+            "args": {
+              "path": "src/csv.js"
+            },
+            "ok": true,
+            "artifacts": [],
+            "output_chars": 649,
+            "ms": 1,
+            "output_preview": "src/csv.js (lines 1-19 of 19)\n   1| // @ts-check\n   2| \n   3| /**\n   4|  * RFC 4180 field: quote when it contains a comma, double quote, CR or LF; double embedded quotes.\n   5|  * @param {string | number | null} value\n   6|  */\n   7| export function csvField(value) {\n   8|   const s = String(value ?? \"\");\n   9|   return /[\",\\r\\n]/.test(s) ? `\"${s.replace(/\"/g, '\"\"')}\"` : s;\n  10| }\n  11| \n  12| /**\n  13|  * @param {string[]} header\n  14|  * @param {Array<Array<string | number | null>>} rows\n  15|  */\n  16| export function toCsv(header, rows) {\n  17|   return [header, ...rows].map((r) => r.map("
+          }
+        ],
+        "tool_calls_rejected": 0,
+        "meta": {
+          "review_mode": "evidence_gate",
+          "model": "z-ai/glm-5.3-flash",
+          "usage": {
+            "prompt_tokens": 3811,
+            "completion_tokens": 794,
+            "total_tokens": 4605
+          },
+          "cost_usd": 0.000505804,
+          "turns": 2,
+          "latency_ms": 22160,
+          "forced_final": false,
+          "repaired": false
+        }
+      }
+    },
+    {
+      "case_id": "remove-xml-exporter",
+      "run": 1,
+      "mode": "decision_judge",
+      "model": "z-ai/glm-5.3-flash",
+      "attempts": 2,
+      "retries": [
+        {
+          "code": "PROVIDER_NETWORK_ERROR",
+          "message": "Network error calling provider: Body is unusable: Body has already been read"
+        }
+      ],
+      "ok": true,
+      "usage_all_attempts": {
+        "prompt_tokens": 1097,
+        "completion_tokens": 2933,
+        "total_tokens": 4030
+      },
+      "cost_usd_all_attempts": 0.0030034379999999998,
+      "cost_source": "reported",
+      "latency_ms": 59975,
+      "verdict": "INSUFFICIENT_EVIDENCE",
+      "review": {
+        "verdict": "INSUFFICIENT_EVIDENCE",
+        "recommendation": "The patch is mechanically clean, but its 'no users' claim is not proven for the highest-risk consumer class: scheduled reports select exporters by format *name* from config/report-schedules.json, and that file's contents are neither shown nor addressed — the 'only code reference to toXml' claim covers the identifier, not the string 'xml' in data. Run the probe below before merging. If any schedule (or any format validation/handling in scheduler.js) references 'xml', migrate that schedule to csv/json or keep the exporter behind a deprecation path; if there are zero matches, the patch is safe as applied.",
+        "critical_assumptions": [
+          "No entry in config/report-schedules.json sets a schedule's format to \"xml\".",
+          "No API route or on-demand handler in scheduler.js accepts format=xml from clients other than the web UI.",
+          "No code path builds the format string dynamically (e.g., Object.keys(EXPORTERS) exposed via a formats-list endpoint, or a format value read from storage/env) that could yield \"xml\".",
+          "package.json has no exports/paths entry pointing at src/exporters/xml.js."
+        ],
+        "material_risks": [
+          "If a scheduled report uses format \"xml\", every subsequent run calls getExporter(\"xml\"), which now throws (the retained test 'unknown format throws' confirms this failure mode), directly violating the 'do not break any existing scheduled report' constraint.",
+          "Scheduled job failures may surface only after the next reporting period elapses, creating a silent-breakage window between deploy and detection."
+        ],
+        "falsification_probe": {
+          "description": "Run: grep -rni 'xml' config/report-schedules.json src/scheduler.js src/exporters/ package.json — specifically inspect every format value in report-schedules.json and any format validation/switch in scheduler.js.",
+          "expected_signal": "Any \"format\": \"xml\" schedule entry, or any scheduler.js code path that accepts/validates/passes \"xml\", falsifies the deletion as unsafe; zero matches across all four files confirms the proposal and it can stand unchanged."
+        },
+        "confidence": 0.72,
+        "meta": {
+          "review_id": "2b6b9831-968f-4746-a13d-bc7f19228cbf",
+          "review_mode": "decision_judge",
+          "model": "z-ai/glm-5.3-flash",
+          "phases": 1,
+          "usage": {
+            "prompt_tokens": 1097,
+            "completion_tokens": 2933,
+            "total_tokens": 4030
+          },
+          "latency_ms": 59975
+        }
+      }
+    },
+    {
+      "case_id": "remove-xml-exporter",
+      "run": 1,
+      "mode": "evidence_gate",
+      "model": "z-ai/glm-5.3-flash",
+      "attempts": 1,
+      "retries": [],
+      "ok": false,
+      "usage_all_attempts": {
+        "prompt_tokens": 9262,
+        "completion_tokens": 5090,
+        "total_tokens": 14352
+      },
+      "cost_usd_all_attempts": 0.0033430207999999998,
+      "cost_source": "reported",
+      "latency_ms": 102010,
+      "error": {
+        "code": "OUTPUT_TRUNCATED",
+        "message": "final answer cut off by max_tokens"
+      }
+    },
+    {
+      "case_id": "retry-jitter",
+      "run": 1,
+      "mode": "decision_judge",
+      "model": "z-ai/glm-5.3-flash",
+      "attempts": 2,
+      "retries": [
+        {
+          "code": "PROVIDER_NETWORK_ERROR",
+          "message": "Network error calling provider: Body is unusable: Body has already been read"
+        }
+      ],
+      "ok": true,
+      "usage_all_attempts": {
+        "prompt_tokens": 1057,
+        "completion_tokens": 2206,
+        "total_tokens": 3263
+      },
+      "cost_usd_all_attempts": 0.0027648,
+      "cost_source": "reported",
+      "latency_ms": 57783,
+      "verdict": "MODIFY",
+      "review": {
+        "verdict": "MODIFY",
+        "recommendation": "Full jitter and the injectable `random` hook are the right approach, but the rewritten loop introduces an off-by-one: `for (attempt = 0; attempt <= opts.attempts; ...)` calls `fn` up to `attempts + 1` times, directly violating the provider's 3-attempt cap (a caller passing attempts:3 now makes a 4th call → merchant throttling) and contradicting the unchanged JSDoc 'at most `attempts` times in total'. It also sleeps after the final failure and changes the `attempts: 0` edge case from 'never call' to 'call once'. Restore `attempt < opts.attempts` with the sleep condition `attempt < opts.attempts - 1`, keeping jitter, `Math.round`, and the `random` hook; then add a test using a stubbed `random` (e.g. `() => 0.5`) asserting `fn` is invoked exactly `attempts` times and the last delay is `base * 2**(attempts-1)`.",
+        "critical_assumptions": [
+          "`opts.attempts` means total invocations of `fn` (per the JSDoc), and callers map it directly to the provider's 'at most 3 attempts per charge' rule (i.e., someone passes attempts: 3).",
+          "Existing tests in test/retry.test.js assert exact call counts and/or sleep sequences.",
+          "Sleeping after the final failed attempt has no downstream value (no webhook/poll on the last delay) — true under the original semantics."
+        ],
+        "material_risks": [
+          "One extra charge attempt per failure sequence triggers provider-side throttling of the merchant account — the exact incident class the constraint exists to prevent.",
+          "Silent behavioral break for every retry() caller (chargeWithRetry and others) without any signature change, so no type/lint signal; only runtime tests would catch it.",
+          "With the buggy loop, `attempts: 0` now invokes `fn` once instead of zero times, and `throw lastError` can still propagate `undefined` for `attempts <= 0`.",
+          "Extra sleep after the last allowed failure delays error surfacing/payment failure reporting by up to base*2^(attempts-1) ms."
+        ],
+        "falsification_probe": {
+          "description": "Run a call-count check with deterministic jitter: `node --test test/retry.test.js`, or inline: a script invoking `retry(async () => { calls++; throw new Error('x') }, { attempts: 3, baseDelayMs: 100, random: () => 0.5, sleep: async () => {} })` and printing `calls`.",
+          "expected_signal": "Falsifies the proposal if `calls === 4` (and if a recorded sleep list shows a 400ms sleep before the 4th call); confirms the fix when a corrected patch yields `calls === 3` with delays [50, 100] (for random()=0.5) and existing tests pass."
+        },
+        "confidence": 0.95,
+        "meta": {
+          "review_id": "29df9f43-dfcb-424f-a73b-b86e223e70a2",
+          "review_mode": "decision_judge",
+          "model": "z-ai/glm-5.3-flash",
+          "phases": 1,
+          "usage": {
+            "prompt_tokens": 1057,
+            "completion_tokens": 2206,
+            "total_tokens": 3263
+          },
+          "latency_ms": 57783
+        }
+      }
+    },
+    {
+      "case_id": "retry-jitter",
+      "run": 1,
+      "mode": "evidence_gate",
+      "model": "z-ai/glm-5.3-flash",
+      "attempts": 1,
+      "retries": [],
+      "ok": false,
+      "usage_all_attempts": {
+        "prompt_tokens": 10286,
+        "completion_tokens": 2428,
+        "total_tokens": 12714
+      },
+      "cost_usd_all_attempts": 0.0015760672,
+      "cost_source": "reported",
+      "latency_ms": 37185,
+      "error": {
+        "code": "MALFORMED_RESPONSE",
+        "message": "final answer invalid after one repair: claim: Invalid input: expected object, received string"
+      }
+    }
+  ]
+}

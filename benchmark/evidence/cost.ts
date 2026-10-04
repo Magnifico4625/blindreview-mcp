@@ -33,13 +33,16 @@ export class CostMeter {
   wrap(inner: typeof fetch = fetch): typeof fetch {
     return async (input, init) => {
       const res = await inner(input, init);
+      // Read the body once and hand the provider an equivalent fresh Response
+      // (res.clone() + reading both copies proved unreliable with undici: "Body has already been read").
+      const text = await res.text();
       try {
-        const body = (await res.clone().json()) as { usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number; cost?: number } };
-        this.add(body.usage);
+        const body = JSON.parse(text) as { usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number; cost?: number } };
+        if (res.ok) this.add(body.usage);
       } catch {
         // non-JSON error bodies: nothing to meter
       }
-      return res;
+      return new Response(text, { status: res.status, statusText: res.statusText, headers: res.headers });
     };
   }
 

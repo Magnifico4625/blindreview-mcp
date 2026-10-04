@@ -16,7 +16,7 @@ export interface EvidenceGateLimits {
   timeoutMs: number;
 }
 
-export const DEFAULT_EVIDENCE_LIMITS: EvidenceGateLimits = { maxToolCalls: 8, maxReviewTokens: 80_000, maxTokensPerCall: 4000, timeoutMs: 300_000 };
+export const DEFAULT_EVIDENCE_LIMITS: EvidenceGateLimits = { maxToolCalls: 8, maxReviewTokens: 80_000, maxTokensPerCall: 8000, timeoutMs: 300_000 };
 
 export interface EvidenceGateResult {
   verdict: GateVerdict;
@@ -178,7 +178,7 @@ export async function runEvidenceGate(opts: {
       }
       if (repaired) {
         if (res.finishReason === "length") throw fail("OUTPUT_TRUNCATED", "final answer cut off by max_tokens");
-        throw fail("MALFORMED_RESPONSE", `final answer invalid after one repair: ${parsed && !parsed.success ? parsed.error.issues.slice(0, 4).map((i) => `${i.path.join(".")}: ${i.message}`).join("; ") : "not a JSON object"}`);
+        throw fail("MALFORMED_RESPONSE", `final answer invalid after one repair: ${parsed && !parsed.success ? parsed.error.issues.slice(0, 4).map((i) => `${i.path.join(".")}: ${i.message}`).join("; ") : "not a JSON object"} | answer: ${res.content.slice(0, 300)}`);
       }
       repaired = true;
       forcedFinal = true;
