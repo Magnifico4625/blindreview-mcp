@@ -1,5 +1,14 @@
 # BlindReview MCP
 
+> **ARCHIVED (2026-10-04).** This was a research experiment and it is finished. The code still works, but it is not maintained.
+>
+> **Result in short:**
+> - **v0.2–v0.3, blind-first vs ordinary review:** the hypothesis was not confirmed. Spending extra compute (two passes) helped a little; blindness itself gave no advantage. The real problem we found was **false interventions**: on correct proposals the reviewer asked for changes about 61% of the time while catching ~100% of defects.
+> - **v0.4, Decision Judge with an Evidence Gate** (the reviewer may only intervene with a mechanically confirmed claim: failing test, typecheck error or search hit): on 20 repo-snapshot cases with two cheap models it caught 95–100% of testable defects with 0% false interventions. But recall on untestable (architectural) defects fell to 8–20%. The harness gate itself barely changed verdicts; the effect came from the "prove it with tools" format. Our correct cases also turned out not to be tempting, so the baseline judge rarely intervened either (5–14%), and a follow-up set built to provoke nitpicks did not provoke them (8%). Verdict per the pre-registered criteria: **inconclusive**.
+> - **Takeaway (a hypothesis, not proven):** reviewers stop over-intervening when they are given the rationale behind a decision and read-only tools to check claims. That is a prompt and context recipe, not a reason for a separate MCP server.
+>
+> Details: [`docs/v0.4-evidence-gate.md`](docs/v0.4-evidence-gate.md), [`CHANGELOG.md`](CHANGELOG.md), raw results in [`benchmark-results/`](benchmark-results/). Total model spend for the whole study was about $1.
+
 **One independent, blind-first reviewer for the expensive decisions of AI coding agents.**
 
 > Spend extra inference before expensive implementation.
