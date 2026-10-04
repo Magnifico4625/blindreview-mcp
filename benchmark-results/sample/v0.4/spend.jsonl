@@ -573,3 +573,12 @@
 {"ts":"2026-10-04T13:17:21.429Z","label":"main-qwen3.8-flash","model":"qwen/qwen3.8-flash","mode":"evidence_gate","case_id":"email-domain-case","run":5,"cost_usd":0.00038663200000000003,"source":"reported"}
 {"ts":"2026-10-04T13:17:37.802Z","label":"main-qwen3.8-flash","model":"qwen/qwen3.8-flash","mode":"evidence_gate","case_id":"notify-allsettled","run":5,"cost_usd":0,"source":"reported"}
 {"ts":"2026-10-04T13:18:54.507Z","label":"main-qwen3.8-flash","model":"qwen/qwen3.8-flash","mode":"evidence_gate","case_id":"notify-allsettled","run":5,"cost_usd":0.00045919,"source":"reported"}
+{"ts":"2026-10-04T13:22:01.389Z","label":"main-qwen3.8-flash","model":"qwen/qwen3.8-flash","mode":"decision_judge","case_id":"bounded-lru-memoize","run":1,"cost_usd":0.002874634,"source":"reported"}
+{"ts":"2026-10-04T13:22:05.947Z","label":"main-qwen3.8-flash","model":"qwen/qwen3.8-flash","mode":"decision_judge","case_id":"in-memory-rate-limit","run":2,"cost_usd":0,"source":"estimated"}
+{"ts":"2026-10-04T13:23:46.934Z","label":"main-qwen3.8-flash","model":"qwen/qwen3.8-flash","mode":"decision_judge","case_id":"in-memory-rate-limit","run":2,"cost_usd":0.00158832,"source":"reported"}
+{"ts":"2026-10-04T13:23:51.565Z","label":"main-qwen3.8-flash","model":"qwen/qwen3.8-flash","mode":"decision_judge","case_id":"email-domain-case","run":3,"cost_usd":0,"source":"estimated"}
+{"ts":"2026-10-04T13:24:25.173Z","label":"main-qwen3.8-flash","model":"qwen/qwen3.8-flash","mode":"decision_judge","case_id":"email-domain-case","run":3,"cost_usd":0,"source":"estimated"}
+{"ts":"2026-10-04T13:25:30.648Z","label":"main-qwen3.8-flash","model":"qwen/qwen3.8-flash","mode":"decision_judge","case_id":"email-domain-case","run":3,"cost_usd":0,"source":"estimated"}
+{"ts":"2026-10-04T13:25:34.798Z","label":"main-qwen3.8-flash","model":"qwen/qwen3.8-flash","mode":"decision_judge","case_id":"email-domain-case","run":4,"cost_usd":0,"source":"estimated"}
+{"ts":"2026-10-04T13:27:18.789Z","label":"main-qwen3.8-flash","model":"qwen/qwen3.8-flash","mode":"decision_judge","case_id":"email-domain-case","run":4,"cost_usd":0.001782644,"source":"reported"}
+{"ts":"2026-10-04T13:27:45.139Z","label":"main-qwen3.8-flash","model":"qwen/qwen3.8-flash","mode":"evidence_gate","case_id":"live-dashboard-aggregation","run":5,"cost_usd":0.000505576,"source":"reported"}

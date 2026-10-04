@@ -335,6 +335,24 @@ Each run exports `<ts>.review-sheet.csv`: one row per (flawed-case result, requi
 
 See [`benchmark-results/sample/`](benchmark-results/sample/) (per-label folders; v1 and v0 runs of v0.2 kept for history).
 
+### v0.4.0 experiment: `evidence_gate` (benchmark only)
+
+One final architectural experiment after v0.3.0: a single judge with **read-only, sandboxed tools**
+(grep, symbol search, size-capped file read, config inspection, allowlisted existing tests,
+`tsc --noEmit`) over a small repository snapshot. It may only intervene (MODIFY/REPLACE) with a claim
+that the **harness** validates against a mechanical artifact from the same session (failing test,
+typecheck error, or a search hit outside the patch's own lines); otherwise the verdict is capped at
+WARNING. 20 repo-snapshot cases in `benchmark/repo-cases/`. Pre-registration, design and results:
+[`docs/v0.4-evidence-gate.md`](docs/v0.4-evidence-gate.md); raw results in
+`benchmark-results/sample/v0.4/`.
+
+```bash
+REVIEWER_BASE_URL=https://openrouter.ai/api/v1 npm run benchmark:evidence -- --model <id> --modes evidence_gate,decision_judge --runs 5 --out benchmark-results/v0.4
+npm run benchmark:evidence-summary -- benchmark-results/v0.4/<label> [...] --ledger benchmark-results/v0.4/spend.jsonl
+```
+
+The MCP tool surface is unchanged: `evidence_gate` is not exposed through `review_decision`.
+
 ## Development
 
 ```bash
@@ -367,6 +385,9 @@ src/telemetry/telemetry.ts    opt-in JSONL telemetry
 src/cli/outcome.ts            outcome marking CLI
 benchmark/                    cli, runner, metrics, stats, thresholds, report, compare, human review
 benchmark/cases/              benchmark cases (one file per case)
+src/evidence/                 v0.4.0 evidence_gate: sandbox tools, gate validation, tool loop, tool-calling provider
+benchmark/evidence/           v0.4.0 repo-snapshot runner, metrics, pre-registered criteria, report, summary
+benchmark/repo-cases/         v0.4.0 repo-snapshot cases (case.json + repo/)
 ```
 
 New providers (Anthropic, Gemini, native OpenRouter/xAI, local runtimes) implement `ReviewerProvider` in `src/providers/`; nothing else changes.
@@ -382,7 +403,7 @@ New providers (Anthropic, Gemini, native OpenRouter/xAI, local runtimes) impleme
 
 ## Intentionally not implemented
 
-Web UI, database server, Docker, auth, cloud backend, vector DB, RAG, memory, multiple reviewers, teams, voting, debate rounds, orchestration frameworks, reviewer tools.
+Web UI, database server, Docker, auth, cloud backend, vector DB, RAG, memory, multiple reviewers, teams, voting, debate rounds, orchestration frameworks, reviewer tools in the MCP tool (the read-only evidence tools exist only in the v0.4.0 benchmark mode).
 
 ## License
 
